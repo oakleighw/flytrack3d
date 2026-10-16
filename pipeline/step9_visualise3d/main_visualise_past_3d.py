@@ -11,8 +11,9 @@ triangulation report or the factor graph again:
 The points / tracks are read from the result's csv. The cameras, the ground-truth overlay,
 the arena and the grey triangulated points behind the tracks are rebuilt from the run and
 the current config, using the tracking3d settings and frame offsets saved with the result
-(params.json). The calibration itself is not saved: if cameras.views has changed since,
-those parts are drawn with the new calibration. Nothing is written to the result's folder
+(params.json). The calibration is saved there too (results from before it was added lack
+it), but is not read back: if cameras.views has changed since, those parts are drawn with
+the new calibration. Nothing is written to the result's folder
 (the arena is fitted and cached in <run>/3d/ if the run has no cache yet, as in steps 7 and 8).
 
 From the IDE: edit the SETTINGS block below and press Run (or F5).

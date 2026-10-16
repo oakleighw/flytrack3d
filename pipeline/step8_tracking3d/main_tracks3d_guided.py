@@ -158,7 +158,8 @@ def main():
     report = write_track_outputs(session, tracks, s, out_dir, f"{len(tracks)} annotated object(s), by object number",
                                  extra, {"annotation_file": str(ann_path), "objects": per_object},
                                  params={"mode": "guided", "annotation_file": str(ann_path),
-                                         "evaluation": config.get("evaluation", {})})
+                                         "evaluation": config.get("evaluation", {})},
+                                 cam_cfg=config["cameras"])
     print("\n" + report)
 
     gt = ground_truth_tracks(session, config["cameras"]) if args.source == "pred" else None

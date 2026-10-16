@@ -105,7 +105,8 @@ def main():
     # Step 6 - outputs, then the 3D / 2D evaluation against ground truth (if the run has labels).
     out_dir = session.factor_graph_dir("tracks")
     report = write_track_outputs(session, tracks, s, out_dir, f"{len(tracks)} track(s), best supported first",
-                                 params={"mode": "unguided", "evaluation": config.get("evaluation", {})})
+                                 params={"mode": "unguided", "evaluation": config.get("evaluation", {})},
+                                 cam_cfg=config["cameras"])
     print("\n" + report)
 
     gt = ground_truth_tracks(session, config["cameras"]) if args.source == "pred" else None
