@@ -4,7 +4,8 @@ Pipeline per view:
     1. The view's median frame (scene3d/frames.py): flies vanish, the fruit stays.
     2. Red mask in HSV. Red wraps around hue 0, so it is a union of hue ranges
        (OpenCV hue is 0-179). The saturation floor keeps out the pale pink walls,
-       the value floor the dark red-brown soil.
+       the value floor the dark red-brown soil. If no fruit triangulates, locate.py
+       retries with each of the lower fallback_min_values (dimly lit recordings).
     3. Open (removes soil speckle), then close (joins the fruit across the white
        pattern on its face); each outer contour, filled, is a candidate blob.
     4. Blobs that are too small or not round (area / enclosing-circle area) are
@@ -24,6 +25,7 @@ DEFAULT_HSV = {
     "hue_ranges": [[0, 8], [170, 179]],   # OpenCV hue, 0-179
     "min_saturation": 120,
     "min_value": 60,
+    "fallback_min_values": [40, 30],   # tried in turn only if min_value finds no fruit (dark videos)
     "open_px": 3,
     "close_px": 15,
     "min_area_px": 200,

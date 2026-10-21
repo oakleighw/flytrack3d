@@ -39,21 +39,25 @@ def locate_fruit(session, config: dict, refit: bool = False) -> Fruit | None:
         print(f"\nFruit: {_describe(fruit)} (cached, {cache})")
         return fruit
 
-    images, masks, blobs = [], [], []
-    for v in session.views:
-        img = median_frame(v.source, int(s["frames"]))
-        mask = red_mask(img, s["hsv"]) if img is not None else None
-        images.append(img)
-        masks.append(mask)
-        blobs.append(find_blobs(mask, s["hsv"]) if mask is not None else [])
-    fruit, chosen = reconstruct_fruit([v.camera for v in session.views], blobs, s["mesh"])
+    images = [median_frame(v.source, int(s["frames"])) for v in session.views]
+    # The configured min_value first; the lower fallback_min_values only if no fruit is found with
+    # it (a darker recording), so sessions that are found at min_value keep the same fit.
+    lower = [m for m in s["hsv"].get("fallback_min_values") or [] if m < s["hsv"]["min_value"]]
+    for min_value in [s["hsv"]["min_value"], *sorted(lower, reverse=True)]:
+        hsv = {**s["hsv"], "min_value": min_value}
+        masks = [red_mask(img, hsv) if img is not None else None for img in images]
+        blobs = [find_blobs(mask, hsv) if mask is not None else [] for mask in masks]
+        fruit, chosen = reconstruct_fruit([v.camera for v in session.views], blobs, s["mesh"])
+        if fruit is not None:
+            break
     for v, img, mask, bl in zip(session.views, images, masks, blobs):
         if img is not None:
             save_debug_image(img, mask, bl, chosen.get(v.name), out_dir / "hsv" / f"{v.name}.jpg",
-                             f"{v.name}: {len(bl)} candidate(s), green = used")
+                             f"{v.name}: {len(bl)} candidate(s) at min_value {min_value}, green = used")
     write_cache(cache, key, fruit.to_json() if fruit else None)
     counts = ", ".join(f"{v.name} {len(b)}" for v, b in zip(session.views, blobs))
-    print(f"\nFruit: {_describe(fruit)}\n  red candidates per view: {counts}; masks in {out_dir / 'hsv'}")
+    fallback = f" (fallback: min_value {min_value})" if min_value != s["hsv"]["min_value"] else ""
+    print(f"\nFruit: {_describe(fruit)}{fallback}\n  red candidates per view: {counts}; masks in {out_dir / 'hsv'}")
     return fruit
 
 

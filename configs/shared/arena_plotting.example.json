@@ -4,7 +4,7 @@
   "_readme": "Template only. Copy to arena_plotting.json in this folder, fill it in and delete the '_example' line; the main_*.py scripts refuse to run a config that still has it. Shared: other configs pull it in with \"_include\", so it is set once. Used by steps 7 to 9.",
 
   "arena_plotting": {
-    "_readme": "Static arena objects (fruit, leaves, arena frame) drawn into the 3D plots and the reprojection images of main_points3d.py / main_tracks3d.py / main_tracks3d_guided.py (--no-arena to skip). fruit: the red fake fruit, found without annotations. hsv: per view, the median of 'frames' frames spread over the video is thresholded in HSV (OpenCV hue 0-179; red wraps around 0, hence two hue_ranges; min_saturation keeps out the pink walls, min_value the soil), opened (open_px) and closed (close_px), and round blobs (area >= min_area_px, area / enclosing circle >= min_fill) become candidates, largest max_candidates first. mesh: the combination of one candidate per view that triangulates with every reprojection error <= max_reprojection_px is the fruit (most views first). It is drawn as a lit 'shape' ('hemisphere', as in caliscope, or 'cylinder') standing 'depth' off the wall along 'normal'; null = radius measured from the blobs, depth = radius, normal = towards the mean camera centre (world units, as cameras.t_scale). The result is cached in <run>/3d/fruit/fruit.json, with each view's mask and candidates in <run>/3d/fruit/hsv/<camera>.jpg - check these if the fruit looks wrong.",
+    "_readme": "Static arena objects (fruit, leaves, arena frame) drawn into the 3D plots and the reprojection images of main_points3d.py / main_tracks3d.py / main_tracks3d_guided.py (--no-arena to skip). fruit: the red fake fruit, found without annotations. hsv: per view, the median of 'frames' frames spread over the video is thresholded in HSV (OpenCV hue 0-179; red wraps around 0, hence two hue_ranges; min_saturation keeps out the pink walls, min_value the soil; if no fruit is found, it is retried with each lower fallback_min_values in turn, for dimly lit videos), opened (open_px) and closed (close_px), and round blobs (area >= min_area_px, area / enclosing circle >= min_fill) become candidates, largest max_candidates first. mesh: the combination of one candidate per view that triangulates with every reprojection error <= max_reprojection_px is the fruit (most views first). It is drawn as a lit 'shape' ('hemisphere', as in caliscope, or 'cylinder') standing 'depth' off the wall along 'normal'; null = radius measured from the blobs, depth = radius, normal = towards the mean camera centre (world units, as cameras.t_scale). The result is cached in <run>/3d/fruit/fruit.json, with each view's mask and candidates in <run>/3d/fruit/hsv/<camera>.jpg - check these if the fruit looks wrong.",
     "fruit": {
       "enabled": true,
       "frames": 15,
@@ -12,6 +12,7 @@
         "hue_ranges": [[0, 8], [170, 179]],
         "min_saturation": 120,
         "min_value": 60,
+        "fallback_min_values": [40, 30],
         "open_px": 3,
         "close_px": 15,
         "min_area_px": 200,
