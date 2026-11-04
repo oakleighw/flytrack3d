@@ -197,10 +197,9 @@ def optimise_guided(obj: GuidedObject, seed: np.ndarray, views: list[View], gcam
         frames, xyz = frames[k0:k1 + 1], xyz[k0:k1 + 1]
         obs = [(k - k0, v, j) for k, v, j in obs if k0 <= k <= k1]
         anchors = [(a.frame - frames[0], a.view, a.xy) for a in obj.anchors]
-        if report:
-            report(f"round {it + 1}/{iterations}: solving {len(frames)} frames, {len(obs)} dets, "
-                   f"{len(anchors)} annotations" + (" + sigma" if it == iterations - 1 else ""))
-        xyz, sigma = _solve(frames, xyz, obs, views, gcams, s, with_sigma=(it == iterations - 1), anchors=anchors)
+        head = f"round {it + 1}/{iterations}: {len(frames)} frames, {len(obs)} dets, {len(anchors)} annotations"
+        xyz, sigma = _solve(frames, xyz, obs, views, gcams, s, with_sigma=(it == iterations - 1), anchors=anchors,
+                            report=report and (lambda m, head=head: report(f"{head} | {m}")))
 
     n_views = np.bincount([k for k, _, _ in obs], minlength=len(frames)) if obs else np.zeros(len(frames), int)
     reproj = np.array([np.linalg.norm(views[v].camera.project(xyz[k])[0] - views[v].dets[int(frames[k])][j, :2])

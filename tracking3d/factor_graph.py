@@ -29,6 +29,9 @@ per frame); see configs/shared/tracking3d.example.json.
 
 from __future__ import annotations
 
+import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 import gtsam
@@ -86,6 +89,31 @@ class Track3D:
         }
 
 
+# ----------------------------------------------------------------------------- progress
+
+@contextmanager
+def _ticking(report, msg: str):
+    """Show `msg` through report(str), re-sent every second with the time spent so far, so a
+    long step (one big solve) never leaves the progress bar looking frozen. Display only."""
+    if report is None:
+        yield
+        return
+    t0, stop = time.perf_counter(), threading.Event()
+
+    def tick():
+        while not stop.wait(1.0):
+            report(f"{msg} {time.perf_counter() - t0:.0f}s")
+
+    report(msg)
+    thread = threading.Thread(target=tick, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
+
+
 # ----------------------------------------------------------------------------- factors
 
 def gtsam_camera(cam: Camera) -> gtsam.PinholeCameraCal3_S2:
@@ -106,9 +134,10 @@ def _accel_error(this: gtsam.CustomFactor, values: gtsam.Values, H: list[np.ndar
 
 def _solve(frames: np.ndarray, init: np.ndarray, obs: list[tuple[int, int, int]], views: list[View],
            gcams: list, s: dict, with_sigma: bool = False,
-           anchors: list[tuple[int, int, np.ndarray]] = ()) -> tuple[np.ndarray, np.ndarray]:
+           anchors: list[tuple[int, int, np.ndarray]] = (), report=None) -> tuple[np.ndarray, np.ndarray]:
     """anchors: (k, view, undistorted xy) hand annotations - plain Gaussian reprojection factors
-    with sigma anchor_pixel_sigma (not robust: they are trusted, unlike detections)."""
+    with sigma anchor_pixel_sigma (not robust: they are trusted, unlike detections).
+    report: optional callable(str) for the progress bar (display only)."""
     graph, values = gtsam.NonlinearFactorGraph(), gtsam.Values()
     pix = gtsam.noiseModel.Robust.Create(gtsam.noiseModel.mEstimator.Huber.Create(s["huber_k"]),
                                          gtsam.noiseModel.Isotropic.Sigma(2, s["pixel_sigma"]))
@@ -133,33 +162,43 @@ def _solve(frames: np.ndarray, init: np.ndarray, obs: list[tuple[int, int, int]]
     # Solve all factors jointly (Levenberg-Marquardt).
     params = gtsam.LevenbergMarquardtParams()
     params.setMaxIterations(100)
-    result = gtsam.LevenbergMarquardtOptimizer(graph, values, params).optimize()
+    optimizer = gtsam.LevenbergMarquardtOptimizer(graph, values, params)
+    t0 = time.perf_counter()
+    with _ticking(report, "LM solve"):
+        result = optimizer.optimize()
+    lm_done = f"LM {optimizer.iterations()} its {time.perf_counter() - t0:.0f}s"
     xyz = np.array([result.atPoint3(X(k)) for k in range(len(frames))])
 
     sigma = np.full(len(frames), np.nan)
     if with_sigma:
-        sigma = _position_sigma(graph, result, len(frames))
+        sigma = _position_sigma(graph, result, len(frames),
+                                report and (lambda m: report(f"{lm_done}, {m}")))
+    elif report:
+        report(lm_done)
     return xyz, sigma
 
 
-def _position_sigma(graph: gtsam.NonlinearFactorGraph, result: gtsam.Values, n: int) -> np.ndarray:
+def _position_sigma(graph: gtsam.NonlinearFactorGraph, result: gtsam.Values, n: int,
+                    report=None) -> np.ndarray:
     """1-sigma (RMS over axes) of every X(k). gtsam.Marginals uses a Cholesky factorisation,
     which fails when long undetected gaps leave the system only weakly determined, so the
     dense information matrix (X(0)..X(n-1) in order) is inverted instead."""
     try:
         # Factorise once, then read every frame's covariance from it (building Marginals per
         # frame gave the same numbers but re-factorised the whole graph n times: O(n^2)).
-        marginals = gtsam.Marginals(graph, result)
-        return np.array([np.sqrt(np.trace(marginals.marginalCovariance(X(k))) / 3) for k in range(n)])
+        with _ticking(report, "sigma"):
+            marginals = gtsam.Marginals(graph, result)
+            return np.array([np.sqrt(np.trace(marginals.marginalCovariance(X(k))) / 3) for k in range(n)])
     except RuntimeError:
         pass
     try:
-        ordering = gtsam.Ordering()
-        for k in range(n):
-            ordering.push_back(X(k))
-        info = graph.linearize(result).hessian(ordering)[0]
-        cov_diag = np.diag(np.linalg.pinv(info, hermitian=True)).reshape(n, 3)
-        return np.sqrt(np.clip(cov_diag, 0, None).mean(axis=1))
+        with _ticking(report, f"sigma: Marginals failed, dense {3 * n}x{3 * n} inverse (slow)"):
+            ordering = gtsam.Ordering()
+            for k in range(n):
+                ordering.push_back(X(k))
+            info = graph.linearize(result).hessian(ordering)[0]
+            cov_diag = np.diag(np.linalg.pinv(info, hermitian=True)).reshape(n, 3)
+            return np.sqrt(np.clip(cov_diag, 0, None).mean(axis=1))
     except (RuntimeError, np.linalg.LinAlgError):
         return np.full(n, np.nan)
 
@@ -229,12 +268,10 @@ def optimise_track(seed: np.ndarray, views: list[View], gcams: list, s: dict,
         k0, k1 = _main_run([o[0] for o in obs], int(s["link_max_frame_gap"]))
         frames, xyz = frames[k0:k1 + 1], xyz[k0:k1 + 1]
         obs = [(k - k0, v, j) for k, v, j in obs if k0 <= k <= k1]
-        if report:
-            last = it == iterations - 1
-            report(f"round {it + 1}/{iterations}: solving {len(frames)} frames, {len(obs)} dets"
-                   + (" + sigma" if last else ""))
+        head = f"round {it + 1}/{iterations}: {len(frames)} frames, {len(obs)} dets"
         # Solve; per-frame 3D uncertainty only on the last round.
-        xyz, sigma = _solve(frames, xyz, obs, views, gcams, s, with_sigma=(it == iterations - 1))
+        xyz, sigma = _solve(frames, xyz, obs, views, gcams, s, with_sigma=(it == iterations - 1),
+                            report=report and (lambda m, head=head: report(f"{head} | {m}")))
 
     n_views = np.bincount([k for k, _, _ in obs], minlength=len(frames))
     if (n_views >= 2).sum() < MIN_MULTIVIEW_FRAMES:

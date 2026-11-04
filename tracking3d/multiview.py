@@ -21,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 from common.datasets import IMAGE_EXTS, SPLIT_LISTS, Frame, resolve_label_dir
 from common.yolo_format import read_yolo_labels, read_yolo_rows
@@ -222,7 +223,7 @@ def load_views(run: RunInfo, model: str, cam_cfg: dict, source: str = "pred",
             files = [p for p in (run.path / inp / model / PRED_DIR).rglob("*.txt")]
 
         raw, dets = {}, {}
-        for p in files:
+        for p in tqdm(files, desc=f"Loading {cam_name}", unit="file", dynamic_ncols=True, leave=False):
             fno = _frame_no(p.stem)
             if fno is None:
                 continue
@@ -252,7 +253,7 @@ def remove_static_detections(view: View, radius: float, min_fraction: float) -> 
         return 0
     pts = np.vstack([view.dets[f][:, :2] for f in frames])
     occupied = np.zeros(len(pts), int)   # frames with a detection within radius of each detection
-    for f in frames:
+    for f in tqdm(frames, desc=f"Clutter filter {view.name}", unit="frame", dynamic_ncols=True, leave=False):
         occupied += (np.linalg.norm(pts[:, None] - view.dets[f][None, :, :2], axis=2) <= radius).any(axis=1)
     static = occupied >= min_fraction * (frames[-1] - frames[0] + 1)
     splits = np.cumsum([len(view.dets[f]) for f in frames])[:-1]
