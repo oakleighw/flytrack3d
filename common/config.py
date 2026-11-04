@@ -125,3 +125,85 @@ def load_config(path: str | Path) -> dict:
     config.setdefault("output_dir", str(ROOT / "output"))
     resolve_trained_runs(config)
     return config
+
+
+def _get_path(obj, keys: tuple):
+    for k in keys:
+        if not isinstance(obj, dict) or k not in obj:
+            raise KeyError(k)
+        obj = obj[k]
+    return obj
+
+
+def config_source(config_path: str | Path, keys: tuple[str, ...]) -> Path | None:
+    """The file that gives keys (e.g. ("cameras", "views", "344-above", "frame_offset")) its value in
+    load_config(config_path): the file itself if it has the key, else its "_include" files, the last
+    one first (later includes win, see read_config). None if no file in the chain has it."""
+    path = Path(config_path).resolve()
+    if not path.is_file():
+        return None
+    raw = json.loads(path.read_text())
+    try:
+        _get_path(raw, keys)
+        return path
+    except KeyError:
+        pass
+    includes = raw.get("_include") or []
+    for name in reversed([includes] if isinstance(includes, str) else includes):
+        found = config_source(path.parent / name, keys)
+        if found:
+            return found
+    return None
+
+
+def _object_span(text: str, start: int) -> int:
+    """Index just past the JSON object whose "{" is at text[start] (strings are skipped)."""
+    depth, i, in_str = 0, start, False
+    while i < len(text):
+        c = text[i]
+        if in_str:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    raise ValueError("unbalanced braces")
+
+
+def set_frame_offsets_in_file(path: str | Path, offsets: dict[str, int]) -> None:
+    """Write cameras.views.<name>.frame_offset for each name in offsets into the JSON config at path,
+    changing only those numbers so the file's layout (one-line matrices, _readme text) is kept. Checks the
+    result parses to exactly the old config with the new offsets before writing; raises ValueError if not."""
+    path = Path(path)
+    text = path.read_text()
+    expected = json.loads(text)
+    views_at = re.search(r'"views"\s*:\s*\{', text)
+    if not views_at or not isinstance(expected.get("cameras", {}).get("views"), dict):
+        raise ValueError(f"{path.name} has no cameras -> views")
+    for name, value in offsets.items():
+        view = expected["cameras"]["views"].get(name)
+        if not isinstance(view, dict):
+            raise ValueError(f"{path.name} has no camera '{name}'")
+        view["frame_offset"] = int(value)
+        m = re.compile(r'"' + re.escape(name) + r'"\s*:\s*\{').search(text, views_at.end())
+        if not m:
+            raise ValueError(f"cannot find camera '{name}' in {path.name}")
+        open_at = m.end() - 1
+        end = _object_span(text, open_at)
+        body = text[open_at:end]
+        new_body, n = re.subn(r'("frame_offset"\s*:\s*)-?\d+', lambda g: f"{g.group(1)}{int(value)}", body, count=1)
+        if not n:   # no frame_offset yet: add it as the entry's first key
+            indent = re.match(r"\{(\s*)", body).group(1) or " "
+            new_body = "{" + indent + f'"frame_offset": {int(value)},' + body[1:]
+        text = text[:open_at] + new_body + text[end:]
+    if json.loads(text) != expected:
+        raise ValueError(f"editing {path.name} would change more than the frame offsets - not written")
+    path.write_text(text)

@@ -7,7 +7,9 @@
    starts" / "suggest ends" proposes the points from the earlier views (epipolar
    geometry, see tracking3d/annotator/suggest.py); check them, delete or re-place any wrong ones.
    Annotations are saved to <run>/3d/annotations.json and loaded again next time, so
-   they can be refined or reused (--no-gui).
+   they can be refined or reused (--no-gui). A camera's frame offset can be changed in the
+   annotator (, . < > o O): it is kept for this run in <run>/3d/frame_offsets.json (used by
+   every step instead of cameras.json's), or saved to cameras.json for all runs with "W".
 3. Each annotated object gets exactly one factor-graph track: the annotations fix its
    frame range, act as trusted reprojection factors and seed it, so it can bridge
    stretches where the detector lost it. See tracking3d/guided.py.
@@ -33,11 +35,12 @@ ROOT = Path(__file__).resolve().parents[2]   # the repository root
 sys.path.insert(0, str(ROOT))                # so the project packages import when this file is run directly
 
 from scene3d import locate_arena  # noqa: E402
-from common.config import load_config  # noqa: E402
+from common.config import config_source, load_config, set_frame_offsets_in_file  # noqa: E402
 from tracking3d.annotator import run_annotation_gui, view_input_from_source  # noqa: E402
 from tracking3d.evaluate import evaluate_tracks  # noqa: E402
 from tracking3d.guided import anchor_residuals, build_guided_tracks  # noqa: E402
-from tracking3d.multiview import ground_truth_tracks, open_session  # noqa: E402
+from tracking3d.multiview import (ground_truth_tracks, open_session, set_session_offsets,  # noqa: E402
+                                  write_run_offsets)
 from tracking3d.report import write_track_outputs  # noqa: E402
 from tracking3d.triangulate import MatchSettings, camera_baseline_report, triangulate_session  # noqa: E402
 from visualise.plots2d.reprojection import save_reprojection_plots  # noqa: E402
@@ -56,7 +59,23 @@ SHOW = True          # open an interactive (rotatable) 3D window after saving
 # =====================================================================================
 
 
-def annotate(session, path: Path, use_gui: bool) -> list[dict]:
+def save_default_offsets(config_path: Path, session, offsets: dict[str, int]) -> str:
+    """Write offsets into the cameras.json that defines them (the file load_config takes them from);
+    returns a status line. Raises ValueError / OSError if it cannot."""
+    files: dict[Path, dict[str, int]] = {}
+    for name, value in offsets.items():
+        src = config_source(config_path, ("cameras", "views", name))
+        if src is None:
+            raise ValueError(f"no config file defines camera '{name}'")
+        files.setdefault(src, {})[name] = value
+    for src, values in files.items():
+        set_frame_offsets_in_file(src, values)
+        print(f"\nSaved frame offsets to {src}: " + ", ".join(f"{k} {v:+d}" for k, v in values.items()))
+    session.default_offsets.update(offsets)
+    return f"Saved offsets as defaults in {', '.join(p.name for p in files)}"
+
+
+def annotate(session, path: Path, use_gui: bool, config: dict, config_path: Path) -> list[dict]:
     saved = json.loads(path.read_text())["annotations"] if path.is_file() else []
     if not use_gui:
         if not saved:
@@ -74,13 +93,25 @@ def annotate(session, path: Path, use_gui: bool) -> list[dict]:
     print(f"\nOpening the annotator ({len(views)} views"
           f"{f', {len(saved)} saved annotations loaded' if saved else ''}) ...")
     what = "ground-truth labels" if session.source == "gt" else f"{session.model} detections"
-    result = run_annotation_gui(views, saved, title=f"{session.run.name}  |  {session.label}",
-                                detections_label=what, suggest_gate_px=session.settings["max_epipolar_px"])
+    result, offsets = run_annotation_gui(
+        views, saved, title=f"{session.run.name}  |  {session.label}", detections_label=what,
+        suggest_gate_px=session.settings["max_epipolar_px"], default_offsets=session.default_offsets,
+        save_defaults=lambda offs: save_default_offsets(config_path, session, offs))
     if result is None:
-        raise SystemExit("Annotation cancelled - nothing saved, nothing tracked.")
+        raise SystemExit("Annotation cancelled - nothing saved, nothing tracked "
+                         "(offsets saved with 'W' stay in cameras.json).")
+    # Offsets changed in the GUI: re-key the loaded detections so triangulation uses them too.
+    changes = set_session_offsets(session, offsets, config["cameras"])
+    if changes:
+        print("\nFrame offsets changed in the annotator: " + "; ".join(changes))
+    off_file = write_run_offsets(session.run.path, offsets, session.default_offsets)
+    if off_file:
+        print(f"Frame offsets for this run saved to {off_file} (used instead of cameras.json's)")
+    elif changes:
+        print("Frame offsets match cameras.json - no per-run override kept")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"run": session.run.name, "views": [v.name for v in session.views],
-                                "annotations": result}, indent=2))
+                                "frame_offsets": offsets, "annotations": result}, indent=2))
     print(f"Saved {len(result)} annotations to {path}")
     return result
 
@@ -122,7 +153,7 @@ def main():
     print("\nCamera rig:\n" + "\n".join(camera_baseline_report(cams)))
 
     ann_path = Path(args.annotations) if args.annotations else session.run.path / "3d" / "annotations.json"
-    annotations = annotate(session, ann_path, args.gui)
+    annotations = annotate(session, ann_path, args.gui, config, Path(args.config))
     if not annotations:
         raise SystemExit("No annotations - nothing to track.")
     print("\nAnnotated objects:\n" + "\n".join(describe_annotations(annotations, [v.name for v in views])))

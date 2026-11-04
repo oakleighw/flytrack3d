@@ -44,6 +44,15 @@ The annotator keeps the views in sync using each camera's `frame_offset`:
 
 To find an unknown offset, annotate one sharp event, like a take-off, in every view.
 
+You can change the offset of the view you are on without leaving the annotator. The panel, epipolar lines and suggestions update straight away.
+
+- `,` / `.` changes it by -1 / +1, and `<` / `>` by -10 / +10. The buttons in the panel do the same.
+- `o`, or clicking the offset box, lets you type a value. Press Enter to apply it.
+- `O` applies the offset the panel suggests from a START / END annotated in two views.
+- `W` saves the current offsets to `cameras.json` as the defaults for every run.
+
+When you finish, any offsets that differ from `cameras.json` are kept for this run only, in `<run>/3d/frame_offsets.json`. Every step (`main_points3d.py`, `main_tracks3d.py`, the guided tracker) uses that file instead of `cameras.json` for this run. To go back to `cameras.json`, delete the file. Suggestions made before an offset change are not redone, so press `S` / `E` again to refresh them.
+
 ### Output
 
 Outputs and evaluation are the same as for `main_tracks3d.py`, in `factor_graph/guided_<datetime>/`.

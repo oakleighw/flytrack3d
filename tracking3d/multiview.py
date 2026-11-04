@@ -4,7 +4,9 @@ A batch run (main_evaluate2d.py with a "batch" dataset) holds one folder per inp
 video. Each camera in config["cameras"]["views"] is paired with the input whose
 name contains the camera's name (or its "match" string), e.g. camera "344-above"
 <-> input "260723-123554_344-above_session0_...". Frame N of every view is assumed
-to be the same instant, after adding each camera's "frame_offset".
+to be the same instant, after adding each camera's "frame_offset". A run can override
+those offsets in <run>/3d/frame_offsets.json (written by the guided annotator when an offset
+is changed there): open_session applies it, so every step uses the same sync for that run.
 
 Detections come from the run's saved predictions (one YOLO .txt per frame) or,
 with source="gt", from the ground-truth labels the run was evaluated against.
@@ -323,6 +325,7 @@ class Session:
     source: str                             # "pred" or "gt"
     views: list[View]
     settings: dict
+    default_offsets: dict[str, int] = field(default_factory=dict)   # cameras.json's, before run overrides
 
     @property
     def label(self) -> str:
@@ -353,6 +356,14 @@ def open_session(config: dict, run: str | None, model: str | None, source: str,
 
     info = choose_run(Path(config["output_dir"]), cam_cfg, run)
     describe_views(info)
+    defaults = {name: int(cfg.get("frame_offset", 0)) for name, cfg in cam_cfg["views"].items()}
+    overrides = {k: v for k, v in read_run_offsets(info.path).items() if k in cam_cfg["views"]}
+    if overrides:
+        print(f"\nFrame offsets for this run ({run_offsets_path(info.path).relative_to(info.path)}, "
+              f"instead of cameras.json): "
+              + ", ".join(f"{k} {v:+d} (default {defaults[k]:+d})" for k, v in overrides.items()))
+        for k, v in overrides.items():   # config["cameras"] too, so later loads and params.json agree
+            cam_cfg["views"][k]["frame_offset"] = v
     if len(info.matches) < 2:
         raise SystemExit("Need at least 2 matched camera views to triangulate.")
     chosen = choose_model(info, model) if source == "pred" else (model or "-")
@@ -368,7 +379,54 @@ def open_session(config: dict, run: str | None, model: str | None, source: str,
         print(f"\nStatic clutter removed (same spot within {settings['static_radius_px']} px in >= "
               f"{settings['static_min_fraction']:.0%} of frames): "
               + ", ".join(f"{v.name} {n}" for v, n in zip(views, removed)))
-    return Session(info, chosen, source, views, settings)
+    return Session(info, chosen, source, views, settings, defaults)
+
+
+# ----------------------------------------------------------------------------- per-run frame offsets
+
+def run_offsets_path(run_path: Path) -> Path:
+    return Path(run_path) / "3d" / "frame_offsets.json"
+
+
+def read_run_offsets(run_path: Path) -> dict[str, int]:
+    """The run's own frame offsets (camera -> offset), or {} if it has none."""
+    path = run_offsets_path(run_path)
+    if not path.is_file():
+        return {}
+    return {k: int(v) for k, v in json.loads(path.read_text()).get("frame_offsets", {}).items()}
+
+
+def write_run_offsets(run_path: Path, offsets: dict[str, int], defaults: dict[str, int]) -> Path | None:
+    """Keep the offsets that differ from cameras.json's (defaults) in the run's frame_offsets.json;
+    deletes the file when none differ. Returns the file if one was written."""
+    path = run_offsets_path(run_path)
+    differ = {k: int(v) for k, v in offsets.items() if int(v) != int(defaults.get(k, 0))}
+    if not differ:
+        path.unlink(missing_ok=True)
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"_readme": "Frame offsets for this run, used instead of cameras.json's "
+                                           "(only the cameras that differ). Delete to use cameras.json.",
+                                "frame_offsets": differ, "cameras_json_offsets": defaults}, indent=2))
+    return path
+
+
+def set_session_offsets(session: Session, offsets: dict[str, int], cam_cfg: dict | None = None) -> list[str]:
+    """Change the views' frame offsets in place: their detections are re-keyed to the new aligned
+    frame numbers, and cam_cfg (config["cameras"]) is updated to match. Returns one line per change."""
+    changes = []
+    for v in session.views:
+        new = int(offsets.get(v.name, v.camera.frame_offset))
+        delta = new - v.camera.frame_offset
+        if not delta:
+            continue
+        changes.append(f"{v.name}: {v.camera.frame_offset:+d} -> {new:+d}")
+        v.raw = {f + delta: d for f, d in v.raw.items()}
+        v.dets = {f + delta: d for f, d in v.dets.items()}
+        v.camera.frame_offset = new
+        if cam_cfg is not None and v.name in cam_cfg.get("views", {}):
+            cam_cfg["views"][v.name]["frame_offset"] = new
+    return changes
 
 
 def ground_truth_tracks(session: Session, cam_cfg: dict) -> list[np.ndarray] | None:

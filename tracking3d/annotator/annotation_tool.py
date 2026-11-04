@@ -23,6 +23,11 @@ END point per view; any of them may be left out (e.g. a start in one view only).
                                   delete or replace them like any annotation
                g                  go to the instant of the selected object's START / END
                                   (current mode) in another view
+               , / .   < / >      this view's frame offset -1 / +1, -10 / +10
+               o                  type this view's frame offset (or click the offset box)
+               O                  apply the offset the panel suggests (from a START / END
+                                  annotated in two views)
+               W                  save the current offsets to cameras.json as the defaults
                Enter              continue to the next view (finish on the last)
                Backspace          back to the previous view
                Esc                cancel everything
@@ -32,8 +37,11 @@ instant in every view): switching view opens it at the instant you were looking 
 panel shows the matching frame in every other view, and when the same object's START (or
 END) is annotated in two views at instants that differ, it shows the offset that would
 line them up - annotate one sharp event (e.g. a take-off) in every view to find an offset.
+Offsets can be changed while annotating; the panel, epipolar lines and suggestions follow
+at once. The GUI works on copies of the cameras: the offsets it ends with are returned next
+to the annotations, and the caller decides where to keep them.
 
-Annotations are returned as plain dicts:
+Annotations are returned (with the final frame offsets, camera -> offset) as plain dicts:
     {"object": 1, "view": "344-above", "kind": "start", "frame": 214,
      "x": 1032.5, "y": 455.0, "box": [x, y, w, h] or None}
 with x, y in raw (distorted) pixels and frame = the label frame number (frame_000214).
@@ -42,8 +50,10 @@ Suggested points also have "suggested": true (dropped once placed by hand).
 
 from __future__ import annotations
 
+import copy
 import re
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import cv2
@@ -148,8 +158,13 @@ class AnnotationGUI:
     window = "Annotate start / end points"
 
     def __init__(self, views: list[ViewInput], annotations: list[dict] | None = None, title: str = "",
-                 detections_label: str = "detections", suggest_gate_px: float = 15.0):
-        self.views = views
+                 detections_label: str = "detections", suggest_gate_px: float = 15.0,
+                 default_offsets: dict[str, int] | None = None,
+                 save_defaults: Callable[[dict[str, int]], str] | None = None):
+        # Copies of the cameras, so offset changes stay here until the caller takes them.
+        self.views = [replace(v, camera=copy.copy(v.camera)) if v.camera is not None else v for v in views]
+        self.default_offsets = dict(default_offsets or self.offsets)   # cameras.json's, shown for reference
+        self.save_defaults = save_defaults   # offsets -> status message; writes them as the defaults
         self.suggest_gate_px = suggest_gate_px     # epipolar / reprojection gate for suggestions
         self.title = title
         self.detections_label = detections_label   # what the circles are, shown in the help text
@@ -170,6 +185,7 @@ class AnnotationGUI:
         self.pan = None
         self.seeking = False
         self.frame_input: str | None = None
+        self.offset_input: str | None = None
         self.buttons: dict[str, tuple[int, int, int, int]] = {}
         self.rows: list[tuple[tuple[int, int, int, int], dict]] = []
         self.table_scroll = 0
@@ -215,6 +231,41 @@ class AnnotationGUI:
     @staticmethod
     def _offset(view: ViewInput) -> int:
         return view.camera.frame_offset if view.camera is not None else 0
+
+    @property
+    def offsets(self) -> dict[str, int]:
+        """Current frame offset of every view with a camera."""
+        return {v.name: v.camera.frame_offset for v in self.views if v.camera is not None}
+
+    def _set_offset(self, value: int) -> None:
+        """Change this view's frame offset. The view stays on its frame; the other views' matching
+        frames, epipolar lines and suggestions follow (they read the offset when drawn / made)."""
+        cam = self.view.camera
+        if cam is None:
+            self.status = "This view has no camera - no frame offset"
+            return
+        old, cam.frame_offset = cam.frame_offset, int(value)
+        self.status = f"{self.view.name} offset {old:+d} -> {cam.frame_offset:+d}"
+        if any(a.get("suggested") for a in self.ann):
+            self.status += " (re-run S / E suggestions)"
+
+    def _apply_hint(self) -> None:
+        hints = self._offset_hints()
+        if not hints:
+            self.status = f"No offset to suggest: annotate #{self.obj} {self.mode.upper()} here and in another view"
+            return
+        self._set_offset(hints[0][1])
+
+    def _save_defaults(self) -> None:
+        if self.save_defaults is None:
+            self.status = "Saving default offsets is not available here"
+            return
+        try:
+            self.status = self.save_defaults(self.offsets)
+            self.default_offsets.update(self.offsets)
+        except (OSError, ValueError) as e:
+            self.status = f"Not saved: {e}"
+            print(f"\nCould not save the frame offsets as defaults: {e}")
 
     def _instant(self) -> int:
         """The current frame on the shared timeline (frame + this view's frame_offset)."""
@@ -337,9 +388,10 @@ class AnnotationGUI:
         note = self._seek_instant(a["frame"] + self._offset(other))
         self.status = f"At #{self.obj} {self.mode.upper()} of {a['view']} (its frame {a['frame']}){note}"
 
-    def _offset_hints(self) -> list[str]:
+    def _offset_hints(self) -> list[tuple[str, int]]:
         """For the selected object's `mode` point here and in each other view: the offset for
-        this view that would put both at the same instant, when they are not already."""
+        this view that would put both at the same instant, when they are not already.
+        (text, offset) pairs."""
         here = next((a for a in self._view_ann() if a["object"] == self.obj and a["kind"] == self.mode
                      and not a.get("suggested")), None)
         if here is None:
@@ -353,8 +405,8 @@ class AnnotationGUI:
                 continue
             want = a["frame"] + self._offset(v) - here["frame"]
             if want != off:
-                hints.append(f"#{self.obj} {self.mode.upper()} vs {v.name[:12]}: {want - off:+d} fr"
-                             f" -> offset {want:+d} would match")
+                hints.append((f"#{self.obj} {self.mode.upper()} vs {v.name[:12]}: {want - off:+d} fr"
+                              f" -> offset {want:+d} would match", want))
         return hints
 
     def _delete_near(self, x: float, y: float) -> None:
@@ -369,6 +421,21 @@ class AnnotationGUI:
     # ------------------------------------------------------------------ input
 
     def _on_key(self, key: int) -> None:
+        if self.offset_input is not None:
+            ch = key & 0xFF
+            if ch in (13, 10):
+                if self.offset_input not in ("", "-", "+"):
+                    self._set_offset(int(self.offset_input))
+                self.offset_input = None
+            elif ch in (8, 127):
+                self.offset_input = self.offset_input[:-1]
+            elif ch == 27:
+                self.offset_input = None
+            elif ch in (ord("-"), ord("+")) and not self.offset_input:
+                self.offset_input += chr(ch)
+            elif ord("0") <= ch <= ord("9"):
+                self.offset_input += chr(ch)
+            return
         if self.frame_input is not None:
             ch = key & 0xFF
             if ch in (13, 10):
@@ -397,6 +464,9 @@ class AnnotationGUI:
             ord("]"): lambda: self._step_object(1), ord("h"): self._toggle_dets, ord("l"): self._toggle_epipolar,
             ord("S"): lambda: self._suggest("start"), ord("E"): lambda: self._suggest("end"),
             ord("g"): self._goto_other,
+            ord(","): lambda: self._nudge_offset(-1), ord("."): lambda: self._nudge_offset(1),
+            ord("<"): lambda: self._nudge_offset(-10), ord(">"): lambda: self._nudge_offset(10),
+            ord("o"): self._start_offset_input, ord("O"): self._apply_hint, ord("W"): self._save_defaults,
             13: self._continue, 10: self._continue, 8: self._back, 27: self._cancel,
         }
         if ord("1") <= ch <= ord("9"):
@@ -520,10 +590,28 @@ class AnnotationGUI:
          "p10": lambda: self._seek(self.pos + 10), "goto": self._start_input, "dets": self._toggle_dets, "epipolar": self._toggle_epipolar,
          "clear_view": self._clear_view, "goto_other": self._goto_other, "sugg_start": lambda: self._suggest("start"),
          "sugg_end": lambda: self._suggest("end"), "back": self._back, "continue": self._continue,
-         "cancel": self._cancel}[name]()
+         "cancel": self._cancel, "off_m10": lambda: self._nudge_offset(-10),
+         "off_m1": lambda: self._nudge_offset(-1), "off_p1": lambda: self._nudge_offset(1),
+         "off_p10": lambda: self._nudge_offset(10), "off_edit": self._start_offset_input,
+         "off_hint": self._apply_hint, "off_save": self._save_defaults}[name]()
 
     def _start_input(self) -> None:
+        self.offset_input = None
         self.frame_input = ""
+
+    def _start_offset_input(self) -> None:
+        if self.view.camera is None:
+            self.status = "This view has no camera - no frame offset"
+            return
+        self.frame_input = None
+        self.offset_input = ""
+        self.status = "Type the offset (- for negative), Enter to apply, Esc to cancel"
+
+    def _nudge_offset(self, step: int) -> None:
+        if self.view.camera is not None:
+            self._set_offset(self.view.camera.frame_offset + step)
+        else:
+            self._set_offset(0)
 
     def _clear_view(self) -> None:
         n = len(self._view_ann())
@@ -639,6 +727,38 @@ class AnnotationGUI:
         (tw, th), _ = cv2.getTextSize(text, FONT, 0.45, 1)
         cv2.putText(canvas, text, (x + (w - tw) // 2, y + (h + th) // 2), FONT, 0.45, TEXT, 1, cv2.LINE_AA)
 
+    def _draw_offset_controls(self, canvas: np.ndarray, L: int, y: int, bw: int) -> int:
+        """This view's frame offset: -10 -1 [offset box] +1 +10, then "use suggested" / "save as
+        default", then how it compares to cameras.json. Returns the height used."""
+        if self.view.camera is None:
+            cv2.putText(canvas, "no camera for this view - no frame offset", (L, y + 18), FONT, 0.4, DIM, 1,
+                        cv2.LINE_AA)
+            return 26
+        off = self.view.camera.frame_offset
+        sw, h = 44, 26
+        for i, (name, text) in enumerate((("off_m10", "-10"), ("off_m1", "-1"))):
+            self._button_draw(canvas, name, L + i * (sw + 6), y, sw, h, text)
+        ex = L + 2 * (sw + 6)
+        ew = bw - 4 * (sw + 6) + 6
+        txt = (self.offset_input + "_") if self.offset_input is not None else f"frame offset {off:+d}  (o: type)"
+        self._button_draw(canvas, "off_edit", ex, y, ew, h, txt, (60, 60, 90), self.offset_input is not None)
+        for i, (name, text) in enumerate((("off_p1", "+1"), ("off_p10", "+10"))):
+            self._button_draw(canvas, name, ex + ew + 6 + i * (sw + 6), y, sw, h, text)
+        y += h + 4
+        half = (bw - 10) // 2
+        hints = self._offset_hints()
+        self._button_draw(canvas, "off_hint", L, y, half, 24,
+                          f"use suggested {hints[0][1]:+d} (O)" if hints else "use suggested (O)",
+                          (40, 80, 110) if hints else (70, 70, 70))
+        self._button_draw(canvas, "off_save", L + half + 10, y, half, 24, "save as default (W)", (70, 70, 70))
+        changed = [v.name[:12] for v in self.views if v.camera is not None
+                   and v.camera.frame_offset != self.default_offsets.get(v.name, 0)]
+        default = self.default_offsets.get(self.view.name, 0)
+        note = (f"cameras.json: {default:+d}" + (f"   changed: {', '.join(changed)}" if changed else "   (all unchanged)"))
+        cv2.putText(canvas, note[:62], (L, y + 24 + 16), FONT, 0.38, (120, 200, 255) if changed else DIM, 1,
+                    cv2.LINE_AA)
+        return h + 4 + 24 + 28
+
     def _draw_panel(self, canvas: np.ndarray) -> None:
         x0, W, H = self.vp[0], PANEL_W, self.canvas_size[1]
         cv2.rectangle(canvas, (x0, 0), (x0 + W, H), PANEL, -1)
@@ -653,9 +773,9 @@ class AnnotationGUI:
                     TEXT, 2, cv2.LINE_AA)
         y += 20
         cv2.putText(canvas, self.view.label[-48:], (L, y), FONT, 0.38, DIM, 1, cv2.LINE_AA)
-        y += 18
-        cv2.putText(canvas, f"frame offset {self._offset(self.view):+d}   same instant in:", (L, y), FONT, 0.38,
-                    DIM, 1, cv2.LINE_AA)
+        y += 8
+        y += self._draw_offset_controls(canvas, L, y, bw) + 6
+        cv2.putText(canvas, "same instant in:", (L, y), FONT, 0.38, DIM, 1, cv2.LINE_AA)
         y += 16
         same = []
         for v in self.views:
@@ -664,7 +784,7 @@ class AnnotationGUI:
                 inside = v.frame_numbers[0] <= f <= v.frame_numbers[-1]
                 same.append(f"{v.name[:12]} {f if inside else 'none'}")
         cv2.putText(canvas, "   ".join(same)[:62], (L, y), FONT, 0.38, TEXT, 1, cv2.LINE_AA)
-        for hint in self._offset_hints()[:2]:
+        for hint, _ in self._offset_hints()[:2]:
             y += 16
             cv2.putText(canvas, hint[:62], (L, y), FONT, 0.38, (120, 200, 255), 1, cv2.LINE_AA)
         for i in range(len(self.views)):   # progress dots
@@ -774,9 +894,17 @@ class AnnotationGUI:
 
 
 def run_annotation_gui(views: list[ViewInput], annotations: list[dict] | None = None, title: str = "",
-                       detections_label: str = "detections", suggest_gate_px: float = 15.0) -> list[dict] | None:
-    """Annotate every view in turn. Returns the annotations, or None if cancelled.
+                       detections_label: str = "detections", suggest_gate_px: float = 15.0,
+                       default_offsets: dict[str, int] | None = None,
+                       save_defaults: Callable[[dict[str, int]], str] | None = None
+                       ) -> tuple[list[dict] | None, dict[str, int]]:
+    """Annotate every view in turn. Returns (annotations, or None if cancelled; the frame offsets
+    the views ended with, camera -> offset). The views' cameras are not changed.
     detections_label says what the detection circles are (e.g. the model name).
     suggest_gate_px: how far (pixels) a detection may be from the epipolar line / reprojected
-    point to be suggested (views need a .camera for suggestions)."""
-    return AnnotationGUI(views, annotations, title, detections_label, suggest_gate_px).run()
+    point to be suggested (views need a .camera for suggestions).
+    default_offsets: cameras.json's offsets, shown next to the current ones (default: the views' own).
+    save_defaults(offsets) -> status message: called by "save (W)" to make the offsets the defaults."""
+    gui = AnnotationGUI(views, annotations, title, detections_label, suggest_gate_px, default_offsets, save_defaults)
+    result = gui.run()
+    return result, gui.offsets
