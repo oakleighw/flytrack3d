@@ -175,7 +175,7 @@ def _seed(obj: GuidedObject, candidates: list[tuple[str, np.ndarray, np.ndarray]
 
 
 def optimise_guided(obj: GuidedObject, seed: np.ndarray, views: list[View], gcams: list, s: dict,
-                    frame_range: tuple[int, int], claimed: set) -> Track3D:
+                    frame_range: tuple[int, int], claimed: set, report=None) -> Track3D:
     annotated = [a.frame for a in obj.anchors]
     lo = obj.start if obj.start is not None else int(min(seed[0, 0], *annotated))
     hi = obj.end if obj.end is not None else int(max(seed[-1, 0], *annotated))
@@ -197,6 +197,9 @@ def optimise_guided(obj: GuidedObject, seed: np.ndarray, views: list[View], gcam
         frames, xyz = frames[k0:k1 + 1], xyz[k0:k1 + 1]
         obs = [(k - k0, v, j) for k, v, j in obs if k0 <= k <= k1]
         anchors = [(a.frame - frames[0], a.view, a.xy) for a in obj.anchors]
+        if report:
+            report(f"round {it + 1}/{iterations}: solving {len(frames)} frames, {len(obs)} dets, "
+                   f"{len(anchors)} annotations" + (" + sigma" if it == iterations - 1 else ""))
         xyz, sigma = _solve(frames, xyz, obs, views, gcams, s, with_sigma=(it == iterations - 1), anchors=anchors)
 
     n_views = np.bincount([k for k, _, _ in obs], minlength=len(frames)) if obs else np.zeros(len(frames), int)
@@ -233,7 +236,8 @@ def build_guided_tracks(views: list[View], points: dict[int, list[Point3D]], ann
     order = sorted(objects, key=lambda o: (-((o.start is not None) + (o.end is not None)), -len(o.anchors), o.id))
     claimed: set = set()
     tracks = []
-    for obj in tqdm(order, desc="Guided factor graph", unit="object", dynamic_ncols=True):
+    bar = tqdm(order, desc="Guided factor graph", unit="object", dynamic_ncols=True)
+    for obj in bar:
         # Starting guess from the clicks: nearest candidate, triangulated / ray-placed clicks, interpolated.
         seed = _seed(obj, candidates, views, s)
         if seed is None:
@@ -242,7 +246,8 @@ def build_guided_tracks(views: list[View], points: dict[int, list[Point3D]], ann
                             f"at the same frame, or nearer to where it is detected.")
             continue
         # Fresh factor graph with the clicks as trusted anchor factors, then claim its detections.
-        tr = optimise_guided(obj, seed, views, gcams, s, frame_range, claimed)
+        tr = optimise_guided(obj, seed, views, gcams, s, frame_range, claimed,
+                             report=lambda m: bar.set_postfix_str(f"object #{obj.id} | {m}"))
         claimed |= {(f, v, j) for f, v, j in tr.observations}
         if (tr.views >= 2).sum() < MIN_MULTIVIEW_FRAMES:
             obj.notes.append(f"only {(tr.views >= 2).sum()} frames seen by 2+ cameras: depth mostly from the "

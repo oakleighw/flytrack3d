@@ -147,8 +147,10 @@ def _position_sigma(graph: gtsam.NonlinearFactorGraph, result: gtsam.Values, n: 
     which fails when long undetected gaps leave the system only weakly determined, so the
     dense information matrix (X(0)..X(n-1) in order) is inverted instead."""
     try:
-        return np.array([np.sqrt(np.trace(m) / 3) for m in
-                         (gtsam.Marginals(graph, result).marginalCovariance(X(k)) for k in range(n))])
+        # Factorise once, then read every frame's covariance from it (building Marginals per
+        # frame gave the same numbers but re-factorised the whole graph n times: O(n^2)).
+        marginals = gtsam.Marginals(graph, result)
+        return np.array([np.sqrt(np.trace(marginals.marginalCovariance(X(k))) / 3) for k in range(n)])
     except RuntimeError:
         pass
     try:
@@ -209,8 +211,9 @@ def _main_run(ks: list[int], max_gap: int) -> tuple[int, int]:
 
 
 def optimise_track(seed: np.ndarray, views: list[View], gcams: list, s: dict,
-                   frame_range: tuple[int, int]) -> Track3D | None:
-    """seed: (K, 4) frame, x, y, z from a tracklet. Returns the optimised track or None."""
+                   frame_range: tuple[int, int], report=None) -> Track3D | None:
+    """seed: (K, 4) frame, x, y, z from a tracklet. Returns the optimised track or None.
+    report: optional callable(str), told what is happening (for the progress bar)."""
     frames = np.arange(int(seed[0, 0]), int(seed[-1, 0]) + 1)
     xyz = np.stack([np.interp(frames, seed[:, 0], seed[:, i]) for i in (1, 2, 3)], axis=1)
     obs: list = []
@@ -226,6 +229,10 @@ def optimise_track(seed: np.ndarray, views: list[View], gcams: list, s: dict,
         k0, k1 = _main_run([o[0] for o in obs], int(s["link_max_frame_gap"]))
         frames, xyz = frames[k0:k1 + 1], xyz[k0:k1 + 1]
         obs = [(k - k0, v, j) for k, v, j in obs if k0 <= k <= k1]
+        if report:
+            last = it == iterations - 1
+            report(f"round {it + 1}/{iterations}: solving {len(frames)} frames, {len(obs)} dets"
+                   + (" + sigma" if last else ""))
         # Solve; per-frame 3D uncertainty only on the last round.
         xyz, sigma = _solve(frames, xyz, obs, views, gcams, s, with_sigma=(it == iterations - 1))
 
@@ -277,10 +284,19 @@ def build_tracks(views: list[View], points: dict[int, list[Point3D]], s: dict) -
 
     tracks: list[Track3D] = []
     # Step 4: refine each tracklet with the factor graph (step 5's skip / merge happen inline).
-    for seed in tqdm(tracklets, desc="Factor graph", unit="tracklet", dynamic_ncols=True):
+    n_skipped = n_merges = 0
+    bar = tqdm(tracklets, desc="Factor graph", unit="tracklet", dynamic_ncols=True)
+
+    def status(what: str, msg: str):
+        # Live detail after the bar: totals so far, the current step, then what the solver is doing.
+        bar.set_postfix_str(f"{len(tracks)} tracks, {n_skipped} skipped, {n_merges} merges | {what} | {msg}")
+
+    for seed in bar:
         if any(_covered(seed, t, s["merge_distance"]) for t in tracks):
+            n_skipped += 1
             continue  # a fragment of a track that is already estimated
-        tr = optimise_track(seed, views, gcams, s, frame_range)
+        what = f"seed {len(seed)}f @ {int(seed[0, 0])}-{int(seed[-1, 0])}"
+        tr = optimise_track(seed, views, gcams, s, frame_range, report=lambda m: status(what, m))
         if tr is None or len(tr.frames) < int(s["min_track_frames"]):
             continue
         # Fragments of one object (e.g. a tracklet broken by missed detections) overlap once
@@ -288,7 +304,10 @@ def build_tracks(views: list[View], points: dict[int, list[Point3D]], s: dict) -
         while (j := next((i for i, t in enumerate(tracks) if _same_object(tr, t, s["merge_distance"])),
                          None)) is not None:
             other = tracks.pop(j)
-            merged = optimise_track(_merged_seed(tr, other), views, gcams, s, frame_range)
+            n_merges += 1
+            what = f"merging {len(tr.frames)}f + {len(other.frames)}f"
+            merged = optimise_track(_merged_seed(tr, other), views, gcams, s, frame_range,
+                                    report=lambda m: status(what, m))
             tr = merged if merged is not None and merged.score >= max(tr.score, other.score) \
                 else max(tr, other, key=lambda t: t.score)
         tracks.append(tr)
