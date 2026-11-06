@@ -1,6 +1,16 @@
-# Tested with Python 3.14 and the versions below.
+# Tested with Python 3.14 and the versions below (3.12 or newer is required).
 # For GPU inference, install torch / torchvision first with the CUDA build for your machine
 # (see https://pytorch.org/get-started/locally/), then: pip install -r requirements.txt
+# The CUDA index must carry torch >= 2.13, or pip replaces it with a CPU build: cu126 or cu130
+# (cu128 stops at 2.11). RTX 50-series cards need CUDA 12.8+, so cu130:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+#
+# Windows: PyPI has no gtsam wheel, and pip installs nothing if one requirement fails. In a conda
+# env, install gtsam from conda-forge first, then switch its BLAS to OpenBLAS (the default MKL
+# one crashes numpy.linalg on Windows without an error message), then run pip as above:
+#   conda install -c conda-forge "gtsam>=4.3" pytest
+#   conda install -c conda-forge "libblas=*=*openblas" "liblapack=*=*openblas" "libcblas=*=*openblas"
+# pip then sees gtsam is already installed and skips it.
 
 # Core
 numpy>=2.0

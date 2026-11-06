@@ -7,7 +7,8 @@ import re
 from pathlib import Path
 
 PATH_KEYS = {"images", "labels", "video", "inputs", "videos_dir", "annotations_zip", "input_dir", "data_yaml",
-             "model_path", "config_path", "output_dir", "p2_model_yaml", "weights_dir", "csv", "fg_labels", "videos", "save"}
+             "model_path", "config_path", "output_dir", "p2_model_yaml", "weights_dir", "csv", "fg_labels", "videos", "save",
+             "folder", "save_dir"}
 ROOT = Path(__file__).resolve().parents[1]   # the repository root
 
 

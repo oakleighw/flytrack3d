@@ -14,6 +14,8 @@ pip install -r requirements.txt
 python setup_configs.py
 ```
 
+This needs Python 3.12 or newer. For GPU torch, or on Windows (where gtsam comes from conda-forge), first follow the notes at the top of [requirements.txt](requirements.txt).
+
 `setup_configs.py` copies every template in `configs/` to the config it stands for (`configs/training.example.json` to `configs/training.json`, and so on), never touching a config that already exists, and lists the ones to fill in. Then:
 
 1. Fill in your paths, models and camera calibration. Start with `configs/shared/paths.json`, which most of the others refer to.
@@ -36,7 +38,7 @@ The scripts to run are the `main_*.py` files in `pipeline/`, grouped into number
 | 6 | [step6_inference](pipeline/step6_inference/README.md) | run detectors on new recordings, without ground truth | `detection.json` |
 | 7 | [step7_points3d](pipeline/step7_points3d/README.md) | match detections across cameras and triangulate them | `tracking.json` |
 | 8 | [step8_tracking3d](pipeline/step8_tracking3d/README.md) | build 3D tracks with the factor graph, automatic or guided | `tracking.json` |
-| 9 | [step9_visualise3d](pipeline/step9_visualise3d/README.md) | reopen past 3D results, or plot points from outside a run | `tracking.json`, `external_points.json` |
+| 9 | [step9_visualise3d](pipeline/step9_visualise3d/README.md) | reopen past 3D results, plot points from outside a run, or compare all runs aligned on the fruit | `tracking.json`, `external_points.json`, `visualise_all.json` |
 
 ## Layout
 

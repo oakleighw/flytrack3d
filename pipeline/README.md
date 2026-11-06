@@ -97,8 +97,10 @@ Config: `configs/tracking.json`. Details: [step8_tracking3d](step8_tracking3d/RE
 | --- | --- |
 | `main_visualise_past_3d.py` | reopens the interactive 3D plot of a past step 7 / 8 result |
 | `main_visualise_external_points.py` | the same 3D plot for files that come without their run |
+| `main_visualise_all.py` | draws every run's tracks in a folder together, aligned on the fruit, and compares folders of runs |
+| `main_visualise_past_all.py` | reopens the interactive plot of a past `main_visualise_all.py` output |
 
-Config: `configs/tracking.json` and `configs/external_points.json`. Details: [step9_visualise3d](step9_visualise3d/README.md).
+Config: `configs/tracking.json`, `configs/external_points.json` and `configs/visualise_all.json`. Details: [step9_visualise3d](step9_visualise3d/README.md).
 
 ## Shared by the 3D scripts (steps 7 to 9)
 

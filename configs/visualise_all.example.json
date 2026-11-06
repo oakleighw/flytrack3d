@@ -1,0 +1,24 @@
+{
+  "_example": true,
+
+  "_readme": "Template only. Copy to visualise_all.json in this folder, fill it in and delete the '_example' line; the main_*.py scripts refuse to run a config that still has it. Step 9 (main_visualise_all.py): the groups of runs to draw together. The fruit, leaves and arena frame styles and the arena frame's size come from the shared arena_plotting.json in \"_include\". Relative paths are resolved against the folder this file is in.",
+
+  "_include": ["shared/arena_plotting.json"],
+
+  "visualise_all": {
+    "_readme": "groups = the folders to compare, each drawn in its own colour: name (legend and output folder), folder (a folder of run folders, searched up to 3 levels down for folders holding a 3d/ folder) and colour (any matplotlib colour; null = the next of a fixed palette, pink first then blue). One group draws every run of one folder. kinds = which saved result of each run to draw, in order of preference: 'guided' (main_tracks3d_guided.py), 'tracks' (main_tracks3d.py); the latest one of the first kind a run has. detections = the model whose results to draw (null = the run's only one, or the first that is not ground_truth). min_track_frames = shorter tracks are left out. Every run is moved into one frame centred on its fruit (origin = the fruit's base on the wall, x right, y towards the wall, z up, world units): a rigid transform from its cached fruit fit (<run>/3d/fruit/fruit.json) and calibration; a run without a fruit fit is skipped. arena = what to draw of the arena: one fruit (the median size), every run's leaves (overlaid: darker where they agree) and the arena frame. track_style: lw / alpha of the lines, detections = dots on the frames with YOLO detections (dot_size), endpoints = entry triangle, exit square. side_by_side = with several groups, also save side_by_side.png: one column per group (its tracks alone), the same views on the same axes, to compare them. save_dir = where the pngs, csv and json go (null = <output_dir>/visualise_all/<groups>_<datetime>/). show = open the interactive window. dpi = of the png.",
+    "groups": [
+      {"name": "cladding", "folder": "path/to/tracks/cladding", "colour": "#e0458f"},
+      {"name": "control", "folder": "path/to/tracks/control", "colour": "#2f6fd6"}
+    ],
+    "kinds": ["guided", "tracks"],
+    "detections": null,
+    "min_track_frames": 10,
+    "arena": {"fruit": true, "leaves": true, "frame": true},
+    "track_style": {"lw": 1.0, "alpha": 0.7, "detections": true, "dot_size": 2.0, "endpoints": true},
+    "side_by_side": true,
+    "save_dir": null,
+    "show": true,
+    "dpi": 150
+  }
+}

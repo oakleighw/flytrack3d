@@ -36,6 +36,7 @@ class SavedTrack:
     frames: np.ndarray   # (T,) aligned frame numbers
     xyz: np.ndarray      # (T, 3)
     score: int           # number of detections on the track
+    n_views: np.ndarray | None = None   # (T,) cameras whose detections the track was fitted to, per frame
 
 
 @dataclass
@@ -88,7 +89,8 @@ class PastResult:
         tracks = []
         for tid in np.unique(rows[:, 0]):
             r = rows[rows[:, 0] == tid]
-            tracks.append(SavedTrack(int(tid), r[:, 1].astype(int), r[:, 2:5], int(r[:, 6].sum())))
+            tracks.append(SavedTrack(int(tid), r[:, 1].astype(int), r[:, 2:5], int(r[:, 6].sum()),
+                                     r[:, 6].astype(int)))
         return tracks
 
     def anchors(self, tracks: list[SavedTrack], frame_offsets: dict[str, int]) -> list[tuple[int, str, np.ndarray]]:

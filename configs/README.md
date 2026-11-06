@@ -23,6 +23,7 @@ Stage configs:
 | `detection.json` | steps 5 and 6 | the `models`; includes the detection source, the evaluation settings and `training.json` |
 | `tracking.json` | steps 7 to 9 | only includes: cameras, tracking3d, arena plotting, evaluation |
 | `external_points.json` | step 9 (external points) | the `inputs`; includes cameras, tracking3d, arena plotting |
+| `visualise_all.json` | step 9 (all runs) | the groups of runs to compare; includes arena plotting |
 
 Shared configs:
 
