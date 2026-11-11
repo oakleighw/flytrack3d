@@ -101,10 +101,41 @@ def scan_run(run_dir: Path, cam_cfg: dict) -> RunInfo:
     return RunInfo(run_dir, inputs, models, metadata, matches, problems)
 
 
-def list_runs(output_root: Path, cam_cfg: dict) -> list[RunInfo]:
+def run_folders(output_root: Path) -> list[Path]:
+    """The run folders in output_root: any folder holding a run's metadata.json, whatever its name
+    (runs are often renamed from run_<datetime> to the recording they hold)."""
     if not output_root.is_dir():
         return []
-    return [scan_run(d, cam_cfg) for d in sorted(output_root.glob("run_*")) if d.is_dir()]
+    return [d for d in sorted(output_root.iterdir()) if d.is_dir() and (d / "metadata.json").is_file()]
+
+
+def relocate_videos(run: RunInfo, video_dirs) -> list[str]:
+    """Inputs whose saved video (or image folder) is gone - moved, or its folder renamed - are
+    looked for by name in video_dirs and their sub-folders; the first match replaces the saved
+    path in run.metadata (in memory only: metadata.json is not changed). Returns one line per input
+    found elsewhere or still missing."""
+    dirs = [Path(d).expanduser() for d in ([video_dirs] if isinstance(video_dirs, str) else video_dirs or [])]
+    lines = []
+    for inp, entry in run.metadata.get("inputs", {}).items():
+        src = entry.get("dataset", {}).get("source", {})
+        key = "video" if src.get("video") else "images" if src.get("images") else None
+        if key is None or Path(src[key]).exists():
+            continue
+        name = Path(src[key]).name
+        hit = next((p for d in dirs if d.is_dir()
+                    for p in ([d / name] if (d / name).exists() else sorted(d.rglob(name)))
+                    if p.is_file() == (key == "video")), None)
+        if hit is None:
+            lines.append(f"  {inp}: {name} not found (saved path {src[key]}; searched video_dirs: "
+                         f"{', '.join(map(str, dirs)) or 'none set'})")
+            continue
+        src[key] = str(hit)
+        lines.append(f"  {inp}: using {hit}")
+    return lines
+
+
+def list_runs(output_root: Path, cam_cfg: dict) -> list[RunInfo]:
+    return [scan_run(d, cam_cfg) for d in run_folders(output_root)]
 
 
 def _ask(prompt: str, n: int, default: int) -> int:
@@ -356,6 +387,9 @@ def open_session(config: dict, run: str | None, model: str | None, source: str,
 
     info = choose_run(Path(config["output_dir"]), cam_cfg, run)
     describe_views(info)
+    moved = relocate_videos(info, config.get("video_dirs"))
+    if moved:
+        print("\nVideos not at the path saved in metadata.json, looked for in video_dirs:\n" + "\n".join(moved))
     defaults = {name: int(cfg.get("frame_offset", 0)) for name, cfg in cam_cfg["views"].items()}
     overrides = {k: v for k, v in read_run_offsets(info.path).items() if k in cam_cfg["views"]}
     if overrides:

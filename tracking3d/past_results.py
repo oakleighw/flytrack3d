@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .multiview import _ask
+from .multiview import _ask, run_folders
 
 KINDS = {"points": "triangulated points  (main_points3d.py)",
          "tracks": "unguided tracks      (main_tracks3d.py)",
@@ -127,7 +127,7 @@ def choose_past_run(output_root: Path, run: str | None = None) -> tuple[Path, li
             raise SystemExit(f"{p.name} has no saved 3D results. Run main_points3d.py or main_tracks3d*.py on it first.")
         return p, results
 
-    runs = [(d, find_results(d)) for d in sorted(output_root.glob("run_*")) if d.is_dir()]
+    runs = [(d, find_results(d)) for d in run_folders(output_root)]
     runs = [(d, r) for d, r in runs if r]
     if not runs:
         raise SystemExit(f"No run in {output_root} has saved 3D results. "

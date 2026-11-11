@@ -108,6 +108,10 @@ Config: `configs/tracking.json`, `configs/external_points.json` and `configs/vis
 
 Use `--source gt` on the 3D scripts to run them on the ground-truth labels instead of the predictions.
 
+### Moved or renamed videos
+
+A run saves the full path of each video in its `metadata.json`, and steps 7 to 9 open the video from that path. If you move a video, or rename its folder, list the folder you keep videos in under `video_dirs` in `configs/tracking.json`. When a saved path no longer exists, the scripts look for a file of the same name in those folders and all their sub-folders, and print which one they use. `metadata.json` is not changed.
+
 ### Fruit, leaves and arena frame
 
 The 3D scripts also draw the red fake fruit, the green leaves around it and the arena frame, with no annotation needed. The fruit and leaves come from each view's median frame (frames sampled across the video, so the flies vanish), segmented in HSV:
