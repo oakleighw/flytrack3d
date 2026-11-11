@@ -36,7 +36,7 @@ sys.path.insert(0, str(ROOT))                # so the project packages import wh
 
 from scene3d import locate_arena  # noqa: E402
 from common.config import config_source, load_config, set_frame_offsets_in_file  # noqa: E402
-from tracking3d.annotator import run_annotation_gui, view_input_from_source  # noqa: E402
+from tracking3d.annotator import run_annotation_gui, view_inputs_from_session  # noqa: E402
 from tracking3d.evaluate import evaluate_tracks  # noqa: E402
 from tracking3d.guided import anchor_residuals, build_guided_tracks  # noqa: E402
 from tracking3d.multiview import (ground_truth_tracks, open_session, set_session_offsets,  # noqa: E402
@@ -83,13 +83,7 @@ def annotate(session, path: Path, use_gui: bool, config: dict, config_path: Path
         print(f"\nUsing {len(saved)} saved annotations from {path}")
         return saved
 
-    views = []
-    for v in session.views:
-        detections = {f - v.camera.frame_offset: d for f, d in v.raw.items()}  # back to label frame numbers
-        try:
-            views.append(view_input_from_source(v.name, v.input_name, v.source, detections, v.camera))
-        except FileNotFoundError as e:
-            raise SystemExit(f"Cannot open the video for {v.name}: {e}") from None
+    views = view_inputs_from_session(session)
     print(f"\nOpening the annotator ({len(views)} views"
           f"{f', {len(saved)} saved annotations loaded' if saved else ''}) ...")
     what = "ground-truth labels" if session.source == "gt" else f"{session.model} detections"

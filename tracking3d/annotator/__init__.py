@@ -4,6 +4,6 @@
     suggest          points suggested in a view from those of earlier views (epipolar geometry)
 """
 
-from .annotation_tool import ViewInput, run_annotation_gui, view_input_from_source
+from .annotation_tool import ViewInput, run_annotation_gui, view_input_from_source, view_inputs_from_session
 
-__all__ = ["ViewInput", "run_annotation_gui", "view_input_from_source"]
+__all__ = ["ViewInput", "run_annotation_gui", "view_input_from_source", "view_inputs_from_session"]

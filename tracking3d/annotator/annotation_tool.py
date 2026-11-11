@@ -77,6 +77,7 @@ OBJECT_COLOURS = [(180, 119, 31), (14, 127, 255), (40, 39, 214), (189, 103, 148)
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 PANEL_W = 400
+SCROLL_W = 26                 # width of the up / down column beside an overflowing table
 TIMELINE_H = 54
 MIN_H = 830
 MAX_VIEW_W, MAX_VIEW_H = 1280, 820
@@ -85,6 +86,18 @@ DRAG_MIN_PX = 4       # display pixels: shorter drags count as clicks
 
 KEY_LEFT = {81, 65361, 2424832, 16777234}
 KEY_RIGHT = {83, 65363, 2555904, 16777236}
+
+
+LABEL_SCALE = 0.4             # text beside the marks on the image (kept small: the flies are tiny)
+SMALL_SCALE = 0.35            # secondary text on the image (other frames' marks, epipolar lines)
+
+
+def draw_cross(img: np.ndarray, p: tuple[int, int], colour, tilted: bool = False, size: int = 11, gap: int = 4) -> None:
+    """A 1 px cross (x if tilted) with an open centre, so the pixel it marks stays visible."""
+    x, y = p
+    d = (1, 1) if tilted else (1, 0)
+    for sx, sy in (d, (-d[0], -d[1]), (-d[1], d[0]), (d[1], -d[0])):   # four arms, 90 degrees apart
+        cv2.line(img, (x + sx * gap, y + sy * gap), (x + sx * size, y + sy * size), colour, 1, cv2.LINE_AA)
 
 
 def object_colour(obj: int) -> tuple[int, int, int]:
@@ -152,6 +165,19 @@ def view_input_from_source(name: str, label: str, source: dict, detections: dict
         return ViewInput(name, label, images=[str(p) for p in imgs], frame_numbers=nums, detections=detections,
                          camera=camera)
     raise FileNotFoundError(f"No readable video or image folder for view '{name}' ({source})")
+
+
+def view_inputs_from_session(session) -> list[ViewInput]:
+    """One ViewInput per view of a tracking3d Session (its video, its detections back in label
+    frame numbers, its camera). Exits with a message if a view's video cannot be opened."""
+    views = []
+    for v in session.views:
+        detections = {f - v.camera.frame_offset: d for f, d in v.raw.items()}  # back to label frame numbers
+        try:
+            views.append(view_input_from_source(v.name, v.input_name, v.source, detections, v.camera))
+        except FileNotFoundError as e:
+            raise SystemExit(f"Cannot open the video for {v.name}: {e}") from None
+    return views
 
 
 class AnnotationGUI:
@@ -521,7 +547,7 @@ class AnnotationGUI:
                 self.offset = [ix - x / self.scale, iy - y / self.scale]
                 self._clamp_offset()
             elif x >= self.vp[0]:
-                self.table_scroll = max(0, self.table_scroll + (-1 if delta > 0 else 1))
+                self._scroll_table(-1 if delta > 0 else 1)
             return
 
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -593,7 +619,8 @@ class AnnotationGUI:
          "cancel": self._cancel, "off_m10": lambda: self._nudge_offset(-10),
          "off_m1": lambda: self._nudge_offset(-1), "off_p1": lambda: self._nudge_offset(1),
          "off_p10": lambda: self._nudge_offset(10), "off_edit": self._start_offset_input,
-         "off_hint": self._apply_hint, "off_save": self._save_defaults}[name]()
+         "off_hint": self._apply_hint, "off_save": self._save_defaults,
+         "tbl_up": lambda: self._scroll_table(-1), "tbl_dn": lambda: self._scroll_table(1)}[name]()
 
     def _start_input(self) -> None:
         self.offset_input = None
@@ -630,7 +657,9 @@ class AnnotationGUI:
         self._draw_panel(canvas)
         return canvas
 
-    def _draw_viewport(self, canvas: np.ndarray) -> None:
+    def _draw_image(self, canvas: np.ndarray) -> np.ndarray:
+        """The (zoomed / panned) frame into the viewport, with the detections if shown.
+        Returns the viewport region of the canvas, to draw on in display pixels."""
         h, w = self.img.shape[:2]
         x0, y0 = int(self.offset[0]), int(self.offset[1])
         x1 = min(w, int(np.ceil(self.offset[0] + self.vp[0] / self.scale)))
@@ -647,8 +676,11 @@ class AnnotationGUI:
             d = self.view.detections.get(self.frame_no)
             for x, y in (d[:, :2] if d is not None else []):
                 p = self._to_disp(x, y)
-                cv2.circle(vp, p, 9, (210, 210, 210), 1, cv2.LINE_AA)
-                cv2.circle(vp, p, 1, (210, 210, 210), -1)
+                cv2.circle(vp, p, 9, (210, 210, 210), 1, cv2.LINE_AA)   # no centre dot: it hides the fly
+        return vp
+
+    def _draw_viewport(self, canvas: np.ndarray) -> None:
+        vp = self._draw_image(canvas)
         self._draw_epipolar(vp)
         for a in self._view_ann():
             col = object_colour(a["object"])
@@ -657,21 +689,20 @@ class AnnotationGUI:
             if a["frame"] != self.frame_no:
                 if a["object"] == self.obj:  # ghost of the selected object's other annotations
                     cv2.circle(vp, p, 5, col, 1, cv2.LINE_AA)
-                    cv2.putText(vp, f"{a['kind'][0].upper()}{a['frame']}{q}", (p[0] + 7, p[1] + 4), FONT, 0.4,
-                                col, 1, cv2.LINE_AA)
+                    cv2.putText(vp, f"{a['kind'][0].upper()}{a['frame']}{q}", (p[0] + 7, p[1] + 4), FONT,
+                                SMALL_SCALE, col, 1, cv2.LINE_AA)
                 continue
             if a.get("box"):
                 bx, by, bw, bh = a["box"]
                 cv2.rectangle(vp, self._to_disp(bx, by), self._to_disp(bx + bw, by + bh), col, 1, cv2.LINE_AA)
             kind_c = START_C if a["kind"] == "start" else END_C
-            cv2.drawMarker(vp, p, kind_c, cv2.MARKER_CROSS if a["kind"] == "start" else cv2.MARKER_TILTED_CROSS,
-                           22, 2, cv2.LINE_AA)
-            cv2.circle(vp, p, 13, col, 1 if q else 2, cv2.LINE_AA)
-            self._label(vp, f"#{a['object']} {a['kind'].upper()}{q}", (p[0] + 16, p[1] - 10), col)
+            draw_cross(vp, p, kind_c, tilted=a["kind"] != "start")
+            cv2.circle(vp, p, 14, col, 1, cv2.LINE_AA)
+            self._label(vp, f"#{a['object']} {a['kind'].upper()}{q}", (p[0] + 17, p[1] - 10), col, LABEL_SCALE)
         if self.drag_start and self.drag_now:
             cv2.rectangle(vp, self.drag_start, self.drag_now, object_colour(self.obj), 1, cv2.LINE_AA)
         self._label(vp, f"{self.view.name}   frame {self.frame_no}   ({self.pos + 1}/{len(self.source)})"
-                        f"{'   zoom x%.1f' % self.zoom if self.zoom > 1 else ''}", (10, 22), TEXT)
+                        f"{'   zoom x%.1f' % self.zoom if self.zoom > 1 else ''}", (10, 22), TEXT, 0.5)
 
     def _draw_epipolar(self, vp: np.ndarray) -> None:
         """Epipolar lines of the selected object's points in the other views, on their frames."""
@@ -690,13 +721,13 @@ class AnnotationGUI:
             if len(disp) >= 2:
                 cv2.polylines(vp, [disp], False, object_colour(a["object"]), 1, cv2.LINE_AA)
                 self._label(vp, f"{a['view']} {a['kind']}", tuple(disp[len(disp) // 2] + [6, -6]),
-                            object_colour(a["object"]), 0.4)
+                            object_colour(a["object"]), SMALL_SCALE)
 
     @staticmethod
-    def _label(img, text, org, colour, scale=0.5) -> None:
+    def _label(img, text, org, colour, scale=LABEL_SCALE) -> None:
         (tw, th), _ = cv2.getTextSize(text, FONT, scale, 1)
         x, y = org
-        cv2.rectangle(img, (x - 4, y - th - 5), (x + tw + 4, y + 5), (20, 20, 20), -1)
+        cv2.rectangle(img, (x - 3, y - th - 4), (x + tw + 3, y + 4), (20, 20, 20), -1)
         cv2.putText(img, text, (x, y), FONT, scale, colour, 1, cv2.LINE_AA)
 
     def _draw_timeline(self, canvas: np.ndarray) -> None:
@@ -720,12 +751,40 @@ class AnnotationGUI:
         last = str(self.view.frame_numbers[-1])
         cv2.putText(canvas, last, (w - 8 - 8 * len(last), top + TIMELINE_H - 4), FONT, 0.38, DIM, 1)
 
-    def _button_draw(self, canvas, name, x, y, w, h, text, colour=(70, 70, 70), active=False) -> None:
+    def _button_draw(self, canvas, name, x, y, w, h, text, colour=(70, 70, 70), active=False, scale=0.45) -> None:
         self.buttons[name] = (x, y, x + w, y + h)
         cv2.rectangle(canvas, (x, y), (x + w, y + h), colour if not active else ACCENT, -1)
         cv2.rectangle(canvas, (x, y), (x + w, y + h), (120, 120, 120) if not active else (255, 255, 255), 1)
-        (tw, th), _ = cv2.getTextSize(text, FONT, 0.45, 1)
-        cv2.putText(canvas, text, (x + (w - tw) // 2, y + (h + th) // 2), FONT, 0.45, TEXT, 1, cv2.LINE_AA)
+        (tw, th), _ = cv2.getTextSize(text, FONT, scale, 1)
+        cv2.putText(canvas, text, (x + (w - tw) // 2, y + (h + th) // 2), FONT, scale, TEXT, 1, cv2.LINE_AA)
+
+    def _table_rows(self, n: int, fit: int) -> int:
+        """How many of a table's n rows are drawn when `fit` fit; clamps table_scroll to match."""
+        shown = min(n, fit)
+        self.table_scroll = min(self.table_scroll, max(0, n - shown))
+        return shown
+
+    def _scroll_table(self, step: int) -> None:
+        self.table_scroll = max(0, self.table_scroll + step)   # the upper bound is clamped when drawn
+
+    def _draw_table_scroll(self, canvas: np.ndarray, L: int, y_head: int, y: int, bw: int, n: int, fit: int,
+                           h: int) -> int:
+        """When a table's n rows overflow the `fit` that fit: an up / down column at its right (the mouse
+        wheel over the panel scrolls too) and "rows a-b of n" on its header line. Returns the rows' width."""
+        if n <= fit:
+            return bw
+        s, W = self.table_scroll, SCROLL_W
+        text = f"{s + 1}-{s + fit} of {n}"
+        (tw, _), _ = cv2.getTextSize(text, FONT, 0.4, 1)
+        cv2.putText(canvas, text, (L + bw - tw, y_head), FONT, 0.4, TEXT, 1, cv2.LINE_AA)
+        x, half = L + bw - W, max(10, (fit * h - 3) // 2)
+        for name, y0, up, live in (("tbl_up", y, True, s > 0), ("tbl_dn", y + fit * h - 3 - half, False, s + fit < n)):
+            self._button_draw(canvas, name, x, y0, W, half, "")
+            cx, cy, r = x + W // 2, y0 + half // 2, min(7, half // 2 - 2)
+            tri = [(cx - r, cy + r // 2), (cx + r, cy + r // 2), (cx, cy - r // 2 - 2)] if up else \
+                  [(cx - r, cy - r // 2), (cx + r, cy - r // 2), (cx, cy + r // 2 + 2)]
+            cv2.fillPoly(canvas, [np.array(tri, np.int32)], TEXT if live else (100, 100, 100), cv2.LINE_AA)
+        return bw - W - 6
 
     def _draw_offset_controls(self, canvas: np.ndarray, L: int, y: int, bw: int) -> int:
         """This view's frame offset: -10 -1 [offset box] +1 +10, then "use suggested" / "save as
@@ -837,9 +896,9 @@ class AnnotationGUI:
         rows = sorted(self._view_ann(), key=lambda a: (a["object"], a["kind"] != "start"))
         footer_top = H - 196
         row_h = 24
-        y += 8
-        max_rows = max(1, (footer_top - 120 - y) // row_h)
-        self.table_scroll = min(self.table_scroll, max(0, len(rows) - max_rows))
+        y_head, y = y, y + 8
+        max_rows = self._table_rows(len(rows), max(1, (footer_top - 120 - y) // row_h))
+        rw = self._draw_table_scroll(canvas, L, y_head, y, bw, len(rows), max_rows, row_h)
         if not rows:
             cv2.putText(canvas, "none yet - click on the fly in the image", (L + 6, y + 18), FONT, 0.42,
                         (120, 120, 120), 1, cv2.LINE_AA)
@@ -847,14 +906,14 @@ class AnnotationGUI:
             ry = y + i * row_h
             sel = a["object"] == self.obj and a["kind"] == self.mode
             here = a["frame"] == self.frame_no
-            cv2.rectangle(canvas, (L, ry), (L + bw, ry + row_h - 3), (75, 75, 75) if sel else (55, 55, 55), -1)
+            cv2.rectangle(canvas, (L, ry), (L + rw, ry + row_h - 3), (75, 75, 75) if sel else (55, 55, 55), -1)
             cv2.rectangle(canvas, (L, ry), (L + 8, ry + row_h - 3), object_colour(a["object"]), -1)
             text = (f"#{a['object']}  {a['kind'].upper():<5}  frame {a['frame']:<6}"
                     f"({a['x']:.0f}, {a['y']:.0f}){'  box' if a.get('box') else ''}"
                     f"{'  suggested' if a.get('suggested') else ''}")
             cv2.putText(canvas, text, (L + 16, ry + 15), FONT, 0.42, (255, 255, 255) if here else TEXT, 1,
                         cv2.LINE_AA)
-            self.rows.append(((L, ry, L + bw, ry + row_h - 3), a))
+            self.rows.append(((L, ry, L + rw, ry + row_h - 3), a))
 
         # all objects across views: start / end frame per view
         y = footer_top - 118
