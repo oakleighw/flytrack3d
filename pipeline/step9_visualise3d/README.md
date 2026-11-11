@@ -1,12 +1,13 @@
 # Step 9: visualise 3D
 
-Part of the [pipeline](../README.md), which explains how to run the scripts. The `--source gt` flag and the fruit / leaves / arena overlays are described [there](../README.md#shared-by-the-3d-scripts-steps-7-to-9).
+Part of the [pipeline](../README.md), which explains how to run the scripts. The `--source gt` flag and the fruit / leaves / arena overlays are described [there](../README.md#shared-by-the-3d-scripts-steps-7-to-10).
 
 ## `main_visualise_past_3d.py`
 
 Opens the interactive 3D plot of a past step 7 / 8 result again, without recomputing it. Nothing is written to the result's folder.
 
-- **Choosing a result:** in the terminal, choose a run, then what to view (its triangulated points, a past unguided run or a past guided run), then which one if there are several.
+- **Choosing a result:** in the terminal, choose a run, then what to view (its triangulated points, a past unguided run, a past guided run or a past hand-corrected run from [step 10](../step10_human_correction/README.md)), then which one if there are several.
+- **Corrected runs:** drawn over the tracks they corrected: those in their colours, the corrected tracks in dark green, the corrections as green diamonds. To see the tracks without the correction, choose the guided / unguided run itself.
 - **Read from the result:** the points / tracks come from the saved csv.
 - **Rebuilt:** the cameras, ground-truth overlay, arena and the grey points behind the tracks are rebuilt using the settings and frame offsets saved in the result's `params.json`.
 - **Calibration:** it is not saved with a result, so those parts follow the current `cameras` config.
@@ -16,7 +17,7 @@ Opens the interactive 3D plot of a past step 7 / 8 result again, without recompu
 Draws the 3D tracks of every run in a folder in one plot, and compares folders of runs (groups) in different colours, e.g. `cladding` in pink against `control` in blue.
 
 - **Config:** `configs/visualise_all.json` (template: `configs/visualise_all.example.json`). Its `groups` list each group's name, folder and colour. `--group NAME FOLDER [COLOUR]` (repeatable) replaces them from the command line.
-- **Runs:** every folder holding a `3d/` folder, up to 3 levels below a group's folder. Each run's latest guided result is drawn, or its latest unguided one if it has none (`kinds`).
+- **Runs:** every folder holding a `3d/` folder, up to 3 levels below a group's folder. Each run's latest hand-corrected result ([step 10](../step10_human_correction/README.md)) is drawn, else its latest guided one, else its latest unguided one. `kinds` sets this order: leave `"corrected"` out to draw the tracks as they were before correction.
 - **Tracks:** the line is the factor-graph track. The dots mark the frames where it was fitted to YOLO detections; where the line runs without dots, the motion prior bridged a gap.
 - **Alignment:** runs are recorded with the rig in different places and with different reference cameras, so their raw coordinates cannot be compared. Averaging them would not fix this, since they differ by a rotation as well as a shift. Each run is instead moved by a rigid transform into a frame centred on its fruit. The origin is the fruit's base on the wall; x points right, y towards the wall and z up, in mm. The transform is built from the run's cached fruit fit (`3d/fruit/fruit.json`) and the calibration it was fitted with, the same wall frame the leaves and arena frame are built on. No video is needed. A run without a fruit fit is skipped, and the terminal says why.
 - **Arena:** one fruit (median size), every run's leaves overlaid (darker where they agree) and the arena frame.

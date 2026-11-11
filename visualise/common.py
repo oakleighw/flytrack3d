@@ -14,7 +14,9 @@ PRED_COLOUR = (0.9, 0.1, 0.6)   # magenta
 EXTRA_COLOUR = (1.0, 0.55, 0.0)  # orange: extra points, e.g. factor-graph boxes inserted by tracking3d
 # tab10 without green: green is reserved for ground truth, as in the 2D plots.
 TRACK_COLOURS = tuple(c for i, c in enumerate(matplotlib.colormaps["tab10"].colors) if i != 2)
-ANCHOR_MARKERS = {"start": "P", "end": "X"}   # annotated start / end points
+ANCHOR_MARKERS = {"start": "P", "end": "X", "correction": "D"}   # annotated start / end, hand corrections
+# Hand-corrected tracks (step 10): a solid dark green line, unlike the wide pale band of the ground truth.
+CORRECTED_COLOUR = (0.0, 0.55, 0.1)
 
 
 def to_bgr(colour_rgb) -> tuple[int, int, int]:

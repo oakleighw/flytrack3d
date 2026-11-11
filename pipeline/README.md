@@ -95,14 +95,22 @@ Config: `configs/tracking.json`. Details: [step8_tracking3d](step8_tracking3d/RE
 
 | Script | What it does |
 | --- | --- |
-| `main_visualise_past_3d.py` | reopens the interactive 3D plot of a past step 7 / 8 result |
+| `main_visualise_past_3d.py` | reopens the interactive 3D plot of a past step 7 / 8 / 10 result |
 | `main_visualise_external_points.py` | the same 3D plot for files that come without their run |
 | `main_visualise_all.py` | draws every run's tracks in a folder together, aligned on the fruit, and compares folders of runs |
 | `main_visualise_past_all.py` | reopens the interactive plot of a past `main_visualise_all.py` output |
 
 Config: `configs/tracking.json`, `configs/external_points.json` and `configs/visualise_all.json`. Details: [step9_visualise3d](step9_visualise3d/README.md).
 
-## Shared by the 3D scripts (steps 7 to 9)
+### Step 10: human correction
+
+| Script | What it does |
+| --- | --- |
+| `main_human_correction.py` | hand-corrects the tracks of a step 8 result where they go wrong, and solves them again |
+
+Config: `configs/tracking.json`. Details: [step10_human_correction](step10_human_correction/README.md).
+
+## Shared by the 3D scripts (steps 7 to 10)
 
 ### Running on the ground truth
 
@@ -110,7 +118,7 @@ Use `--source gt` on the 3D scripts to run them on the ground-truth labels inste
 
 ### Moved or renamed videos
 
-A run saves the full path of each video in its `metadata.json`, and steps 7 to 9 open the video from that path. If you move a video, or rename its folder, list the folder you keep videos in under `video_dirs` in `configs/tracking.json`. When a saved path no longer exists, the scripts look for a file of the same name in those folders and all their sub-folders, and print which one they use. `metadata.json` is not changed.
+A run saves the full path of each video in its `metadata.json`, and steps 7 to 10 open the video from that path. If you move a video, or rename its folder, list the folder you keep videos in under `video_dirs` in `configs/tracking.json`. When a saved path no longer exists, the scripts look for a file of the same name in those folders and all their sub-folders, and print which one they use. `metadata.json` is not changed. Step 10 also takes `--video-dir <folder>` for a single run.
 
 ### Fruit, leaves and arena frame
 

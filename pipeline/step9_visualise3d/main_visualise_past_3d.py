@@ -5,7 +5,10 @@ they finish. This script shows it for any result they saved, without running the
 triangulation report or the factor graph again:
 
 1. Choose a run (only runs with saved 3D results are listed).
-2. Choose what to view: its triangulated points, a past unguided run or a past guided run.
+2. Choose what to view: its triangulated points, a past unguided run, a past guided run or a past
+   hand-corrected run (step 10). A corrected run is drawn over the tracks it corrected: those in
+   their colours, the corrected tracks in dark green; choose the guided / unguided run itself to
+   see it without the correction.
 3. If there are several of that kind, choose which one (they are listed by date).
 
 The points / tracks are read from the result's csv. The cameras, the ground-truth overlay,
@@ -43,7 +46,7 @@ from visualise.plots3d.scene import plot_points_3d, plot_tracks_3d, use_interact
 CONFIG_PATH = ROOT / "configs" / "tracking.json"   # needs "cameras" (calibration)
 RUN = None           # run folder name or path; None = choose in the terminal
 MODEL = None         # whose results: a model in that run or "ground_truth"; None = the only one, or choose
-KIND = None          # "points", "tracks" (unguided) or "guided"; None = choose in the terminal
+KIND = None          # "points", "tracks" (unguided), "guided" or "corrected"; None = choose in the terminal
 RESULT = None        # result folder, e.g. "guided_20261012-143417", or "latest"; None = choose in the terminal
 GT_OVERLAY = True    # draw the run's ground truth (triangulated + linked, no factor graph) in green
 ARENA = True         # draw the fake fruit and leaves, found by HSV in each view (config arena_plotting)
@@ -101,15 +104,27 @@ def main():
         triangulated = triangulate_session(cams, [v.dets for v in views],
                                            MatchSettings(s["max_epipolar_px"], s["max_reprojection_px"]))
         pts = np.array([[f, *p.xyz, len(p.views)] for f, ps in triangulated.items() for p in ps]).reshape(-1, 5)
-        anchors = None
-        if result.kind == "guided":
-            anchors = result.anchors(tracks, {v.name: v.camera.frame_offset for v in views})
+        anchors, corrected = None, None
+        offsets = {v.name: v.camera.frame_offset for v in views}
+        if result.kind == "corrected":
+            # The source tracks as they were, with the hand-corrected ones over them in green.
+            ids = result.corrected_ids()
+            corrected = [t for t in tracks if t.id in ids]
+            try:
+                tracks = result.load_source_tracks()
+            except OSError:
+                print("  The source tracks were not saved with this result: only the corrected run is drawn.")
+            anchors = result.anchors(corrected, offsets)
+            title += (f"{len(tracks)} source tracks, {len(corrected)} hand-corrected in dark green "
+                      f"(diamonds = corrections)")
+        elif result.kind == "guided":
+            anchors = result.anchors(tracks, offsets)
             title += f"{len(tracks)} guided tracks (+ = annotated start, x = annotated end)"
         else:
             title += f"{len(tracks)} tracks (triangle = entry, square = exit)"
         if gt:
-            title += "  |  green = ground truth"
-        plot_tracks_3d(tracks, cams, None, title, pts, gt, anchors, close=False, arena=arena)
+            title += "  |  pale green band = ground truth"
+        plot_tracks_3d(tracks, cams, None, title, pts, gt, anchors, close=False, arena=arena, corrected=corrected)
 
     print(f"\nShowing {result.name}  ({result.created:%Y-%m-%d %H:%M}). Close the window to finish.")
     import matplotlib.pyplot as plt

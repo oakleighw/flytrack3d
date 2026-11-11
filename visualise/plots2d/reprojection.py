@@ -10,17 +10,18 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from ..common import ANCHOR_MARKERS, TRACK_COLOURS, first_image, safe_name  # noqa: E402
+from ..common import ANCHOR_MARKERS, CORRECTED_COLOUR, TRACK_COLOURS, first_image, safe_name  # noqa: E402
 
 
 def save_reprojection_plots(tracks, views, out_dir: Path, dpi: int = 100,
                             annotations: dict[str, list[tuple[int, str, float, float]]] | None = None,
-                            arena=None) -> list[Path]:
+                            arena=None, corrected=None) -> list[Path]:
     """Per camera: first frame, every raw detection (grey) and the 3D tracks projected back
     through the full camera model (with distortion). Tracks that sit on the detections
     confirm the calibration; a constant offset in one view points at its extrinsics.
     Arena objects (scene3d.ArenaObjects), if given, are outlined dashed: they should ring
-    the fruit and the leaves in the image."""
+    the fruit and the leaves in the image. corrected: hand-corrected tracks (step 10), drawn
+    in dark green over the tracks they correct; annotations of kind "correction" are green too."""
     out_dir.mkdir(parents=True, exist_ok=True)
     saved = []
     for v in views:
@@ -39,11 +40,18 @@ def save_reprojection_plots(tracks, views, out_dir: Path, dpi: int = 100,
             ax.plot(uv[:, 0], uv[:, 1], "-", color=col, lw=1.6, label=f"track {t.id}")
             if len(uv):
                 ax.plot(*uv[0], "^", color=col, mec="black", ms=9)
+        for t in corrected or []:
+            front = v.camera.depth(t.xyz) > 0
+            uv = v.camera.project(t.xyz[front], distort=True)
+            ax.plot(uv[:, 0], uv[:, 1], "-", color=CORRECTED_COLOUR, lw=2.0, label=f"track {t.id} corrected")
         if arena:
             arena.draw_image(ax, v.camera)
         for tid, kind, x, y in (annotations or {}).get(v.name, []):
-            col = TRACK_COLOURS[(tid - 1) % len(TRACK_COLOURS)]
-            ax.plot(x, y, ANCHOR_MARKERS[kind], color=col, mec="black", mew=1.2, ms=15, zorder=6)
+            col = CORRECTED_COLOUR if kind == "correction" else TRACK_COLOURS[(tid - 1) % len(TRACK_COLOURS)]
+            ms = 9 if kind == "correction" else 15
+            ax.plot(x, y, ANCHOR_MARKERS[kind], color=col, mec="black", mew=1.2, ms=ms, zorder=6)
+            if kind == "correction":
+                continue   # there can be many: no text box for each
             ax.annotate(f"#{tid} {kind}", (x, y), xytext=(10, -10), textcoords="offset points", fontsize=11,
                         color="black", bbox=dict(boxstyle="round,pad=0.2", fc="white", alpha=0.8))
         ax.set_xlim(0, w)

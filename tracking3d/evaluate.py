@@ -51,7 +51,7 @@ from detection.metrics import box_iou, match_boxes
 from detection.predictions import PRED_DIR, load_predictions, save_predictions
 from visualise.boxes.video import save_backproj_video
 from visualise.charts.evaluation import save_2d_charts, save_3d_charts
-from visualise.common import safe_name
+from visualise.common import CORRECTED_COLOUR, safe_name
 from visualise.metrics.tracking import format_2d, format_3d
 from visualise.plots2d.track_plots import save_track_plots
 
@@ -377,11 +377,81 @@ def evaluate_2d(views: list[View], data: list[ViewData], inserted: list[dict], o
 
 # ----------------------------------------------------------------------------- entry
 
+HAND_POINT_HOLD = 8   # frames either side a hand-placed correction point stays drawn in the videos
+MOVED_PX = 3.0        # a corrected track is drawn green where it is this far from the source track (px, that view)
+
+
+def _split_moved(corrected: list[Track3D], source: dict[int, Track3D], views: list[View],
+                 data: list[ViewData]) -> tuple[list[dict], list[dict]]:
+    """Per view, the corrected tracks' points split into (unchanged, moved): moved where the
+    correction put the track over MOVED_PX from the source track in that view, or where the source
+    track has no point there (outside its frames, behind the camera or out of the image)."""
+    same: list[dict] = [{} for _ in views]
+    moved: list[dict] = [{} for _ in views]
+    for t in corrected:
+        src = source.get(t.id)
+        for v, view in enumerate(views):
+            (w, h), cam = view.size, view.camera
+            uv, depth = cam.project(t.xyz, distort=True), cam.depth(t.xyz)
+            ref = {}
+            if src is not None:
+                for f, d, p in zip(src.frames, cam.depth(src.xyz), cam.project(src.xyz, distort=True)):
+                    if d > 0 and 0 <= p[0] < w and 0 <= p[1] < h:
+                        ref[int(f)] = p
+            for f, d, (x, y) in zip(t.frames, depth, uv):
+                key = data[v].keys.get(int(f))
+                if key is None or d <= 0 or not (0 <= x < w and 0 <= y < h):
+                    continue
+                r = ref.get(int(f))
+                out = moved if r is None or np.hypot(x - r[0], y - r[1]) > MOVED_PX else same
+                out[v].setdefault(key, []).append((x, y))
+    as_arrays = lambda pts: [{k: np.array(p) for k, p in d.items()} for d in pts]
+    return as_arrays(same), as_arrays(moved)
+
+
+def _hand_points(hand: dict[int, list[tuple[float, float]]], d: ViewData) -> dict[str, np.ndarray]:
+    """{aligned frame: [(x, y) raw px]} -> {frame key: (N, 3) x, y, exact}, held HAND_POINT_HOLD frames."""
+    out: dict[str, list] = {}
+    for f, pts in hand.items():
+        for df in range(-HAND_POINT_HOLD, HAND_POINT_HOLD + 1):
+            key = d.keys.get(int(f) + df)
+            if key is not None:
+                out.setdefault(key, []).extend((x, y, float(df == 0)) for x, y in pts)
+    return {k: np.array(v) for k, v in out.items()}
+
+
+def _correction_layers(corrected: list[Track3D], source_tracks: list[Track3D] | None, moved, hand_points,
+                       views: list[View], data: list[ViewData]) -> list[list]:
+    """Per view, step 10's extra layers for the track plots: the corrected tracks as they were
+    (grey), where the correction moved them (dark green) and the correction clicks (dark green
+    rings). [] per view outside step 10."""
+    if not corrected:
+        return [[] for _ in views]
+    ids = {t.id for t in corrected}
+    before = project_tracks([t for t in source_tracks or [] if t.id in ids], views, data)
+    green = moved[1] if moved is not None else project_tracks(corrected, views, data)
+    out = []
+    for v, d, b, g in zip(views, data, before, green):
+        clicks = {k: p[p[:, 2] > 0, :2] for k, p in _hand_points((hand_points or {}).get(v.name, {}), d).items()}
+        out.append([(b, {"marker": ".", "color": "0.35", "ms": 2, "alpha": 0.7}, "track before correction"),
+                    (g, {"marker": "o", "color": CORRECTED_COLOUR, "ms": 2.5, "alpha": 0.9},
+                     "corrected track, where the correction moved it"),
+                    ({k: c for k, c in clicks.items() if len(c)},
+                     {"marker": "o", "mfc": "none", "mec": CORRECTED_COLOUR, "mew": 1.5, "ms": 11},
+                     "correction clicks")])
+    return out
+
+
 def evaluate_tracks(session, config: dict, tracks: list[Track3D], gt_tracks: list[np.ndarray] | None,
-                    out_dir: Path) -> list[str]:
+                    out_dir: Path, corrected_ids=frozenset(),
+                    hand_points: dict[str, dict[int, list[tuple[float, float]]]] | None = None,
+                    source_tracks: list[Track3D] | None = None) -> list[str]:
     """Writes evaluation_3d.txt, evaluation_2d.txt, evaluation.json, track_plots_backproj/ and the
     back-projected labels and videos in reprojection/ (as enabled in tracking3d). Returns the lines
-    to print."""
+    to print. Step 10: the tracks in corrected_ids are drawn green in the videos where the correction
+    moved them (over MOVED_PX from the same track in source_tracks, the result before correction) and
+    red like any other track where it did not (every frame green without source_tracks); hand_points
+    (view name -> {aligned frame: [(x, y) raw px]}, the correction clicks) as green rings."""
     s, msgs, results = session.settings, [], {}
     if session.source != "pred":
         return ["Evaluation skipped: tracks built from the ground-truth labels."]
@@ -418,21 +488,36 @@ def evaluate_tracks(session, config: dict, tracks: list[Track3D], gt_tracks: lis
                 save_predictions(label_dir / v.input_name, d.ds, ins,
                                  d.ds.class_names or read_class_names(pred_dir / "data.yaml"))
             msgs.append(f"Back-projected labels: {label_dir}  ({n_ins} boxes inserted over all views)")
+        moved = None   # step 10: the corrected tracks' points, split into (unchanged, moved by the correction)
+        corrected = [t for t in tracks if t.id in corrected_ids]
+        if corrected and source_tracks is not None:
+            moved = _split_moved(corrected, {t.id: t for t in source_tracks}, session.views, data)
         if s["visualise_backproj_video"]:
-            points = project_tracks(tracks, session.views, data)
-            for v, d, ins, pts in zip(session.views, data, inserted, points):
+            points = project_tracks([t for t in tracks if t.id not in corrected_ids], session.views, data)
+            if moved is None:
+                green = project_tracks(corrected, session.views, data)
+            else:
+                same, green = moved
+                for pts, sm in zip(points, same):   # unchanged by the correction: red, like any track
+                    for k, p in sm.items():
+                        pts[k] = np.vstack([pts[k], p]) if k in pts else p
+            for v, d, ins, pts, gr in zip(session.views, data, inserted, points, green):
                 save_backproj_video(d.ds.frames, d.preds, ins, pts, out_dir / "reprojection" / f"{safe_name(v.name)}.mp4",
-                                    v.name, session.model, d.vis_conf, fps=float(vis.get("video_fps", 30)))
+                                    v.name, session.model, d.vis_conf, fps=float(vis.get("video_fps", 30)),
+                                    corrected_points=gr,
+                                    hand_points=_hand_points((hand_points or {}).get(v.name, {}), d))
             msgs.append(f"Back-projection videos: {out_dir / 'reprojection'}/<camera>.mp4")
         if s["visualise_backproj_graph"]:
             plot_dir = out_dir / "track_plots_backproj"
-            for v, d, ins in zip(session.views, data, inserted):
+            layers = _correction_layers(corrected, source_tracks, moved, hand_points, session.views, data)
+            for v, d, ins, lay in zip(session.views, data, inserted, layers):
                 save_track_plots(d.ds.frames, d.preds, plot_dir, session.model, d.vis_conf,
                                  max_distance=vis.get("track_max_distance_px", 50),
                                  max_gap=vis.get("track_max_frame_gap", 5),
                                  background=vis.get("track_plot_background", True),
                                  extra={k: (b[:, :2] + b[:, 2:4]) / 2 for k, b in ins.items()},
-                                 extra_label="factor graph, back-projected where the detector has no box")
+                                 extra_label="factor graph, back-projected where the detector has no box",
+                                 layers=lay)
             msgs.append(f"Back-projected track plots: {plot_dir}  ({n_ins} boxes inserted over all views)")
     if results:
         (out_dir / "evaluation.json").write_text(json.dumps(results, indent=2))

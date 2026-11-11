@@ -11,7 +11,7 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from ..common import ANCHOR_MARKERS, GT_COLOUR, TRACK_COLOURS  # noqa: E402
+from ..common import ANCHOR_MARKERS, CORRECTED_COLOUR, GT_COLOUR, TRACK_COLOURS  # noqa: E402
 
 POINTS_CMAP = "plasma"   # frame colouring for triangulated points; contains no green
 # Ground truth is a wide translucent band; predictions are drawn thinner on top, so where they
@@ -19,6 +19,7 @@ POINTS_CMAP = "plasma"   # frame colouring for triangulated points; contains no 
 GT_LW, GT_ALPHA = 6.0, 0.35
 PRED_POINT_SIZE = (1.5, 4.0)   # scatter size for 2-view, 3-view points
 PRED_TRACK_LW = 1.2
+CORRECTED_LW = 2.0
 PANELS = (("top  (X-Y)", 0, 1), ("front  (X-Z)", 0, 2))   # orthographic panels
 RIG_ARENA_ALPHA = 0.25   # zoomed out to the cameras, the fruit is as small as the tracks: keep them visible
 
@@ -130,13 +131,14 @@ def plot_points_3d(points: np.ndarray, cameras, out_path: Path | None, title: st
 def plot_tracks_3d(tracks, cameras, out_path: Path | None, title: str, points: np.ndarray | None = None,
                    gt_tracks: list[np.ndarray] | None = None,
                    anchors: list[tuple[int, str, np.ndarray]] | None = None, close: bool = True,
-                   arena=None):
+                   arena=None, corrected=None):
     """Factor-graph tracks as lines (entry = triangle, exit = square); raw triangulated points
     grey; optional ground-truth tracks in green; optional annotated points
-    (track id, "start" / "end", xyz) as large plus / cross markers; optional arena objects
-    (scene3d.ArenaObjects: fruit, leaves), included in the plot extent."""
-    gt_tracks = gt_tracks or []
-    data = np.vstack([t.xyz for t in tracks] + [t[:, 1:4] for t in gt_tracks])
+    (track id, "start" / "end" / "correction", xyz) as large plus / cross / diamond markers; optional
+    arena objects (scene3d.ArenaObjects: fruit, leaves), included in the plot extent; optional
+    hand-corrected tracks (step 10) as solid dark green lines over the tracks they correct."""
+    gt_tracks, corrected = gt_tracks or [], corrected or []
+    data = np.vstack([t.xyz for t in tracks] + [t.xyz for t in corrected] + [t[:, 1:4] for t in gt_tracks])
     extent = np.vstack([data, arena.points()]) if arena else data
     fig, ax3d, ortho, rig = _scene_figure(title, extent, cameras)
     _draw_gt_tracks(ax3d, ortho, rig, gt_tracks)
@@ -161,9 +163,19 @@ def plot_tracks_3d(tracks, cameras, out_path: Path | None, title: str, points: n
             ax.plot(t.xyz[:, i], t.xyz[:, j], color=col, lw=PRED_TRACK_LW, zorder=3)
             ax.plot(t.xyz[0, i], t.xyz[0, j], "^", color=col, mec="black", ms=8)
             ax.plot(t.xyz[-1, i], t.xyz[-1, j], "s", color=col, mec="black", ms=6)
+    for n, t in enumerate(corrected):
+        label = f"corrected track {t.id}: frames {t.frames[0]}-{t.frames[-1]}"
+        for ax in (ax3d, rig):
+            ax.plot(*t.xyz.T, color=CORRECTED_COLOUR, lw=CORRECTED_LW, label=label if ax is ax3d else None, zorder=4)
+            ax.scatter(*t.xyz[0], color=CORRECTED_COLOUR, marker="^", s=60, edgecolor="black")
+            ax.scatter(*t.xyz[-1], color=CORRECTED_COLOUR, marker="s", s=40, edgecolor="black")
+        for ax, (_, i, j) in zip(ortho, PANELS):
+            ax.plot(t.xyz[:, i], t.xyz[:, j], color=CORRECTED_COLOUR, lw=CORRECTED_LW, zorder=4)
+            ax.plot(t.xyz[0, i], t.xyz[0, j], "^", color=CORRECTED_COLOUR, mec="black", ms=8)
+            ax.plot(t.xyz[-1, i], t.xyz[-1, j], "s", color=CORRECTED_COLOUR, mec="black", ms=6)
     if anchors:
         _draw_anchors(ax3d, ortho, rig, anchors)
-    if tracks or arena:
+    if tracks or corrected or arena:
         ax3d.legend(loc="upper left", fontsize=7, framealpha=0.8)
     if out_path is not None:   # None: only build the figure (viewing a past result)
         fig.savefig(out_path, dpi=110)
@@ -173,15 +185,16 @@ def plot_tracks_3d(tracks, cameras, out_path: Path | None, title: str, points: n
 
 
 ANCHOR_COLOUR = "yellow"
+ANCHOR_COLOURS = {"correction": "lime"}   # anything else: ANCHOR_COLOUR
 ANCHOR_SIZE, ANCHOR_RIG_SIZE = 170 / 9, 120 / 9   # scatter sizes are areas: a third of the old width
 
 
 def _draw_anchors(ax3d, ortho, rig, anchors) -> None:
     labelled = set()
     for _, kind, xyz in anchors:
-        label = f"annotated {kind}" if kind not in labelled else None
+        label = (f"annotated {kind}" if kind != "correction" else "hand correction") if kind not in labelled else None
         labelled.add(kind)
-        kw = dict(color=ANCHOR_COLOUR, marker=ANCHOR_MARKERS[kind], edgecolor="black", linewidth=0.5, zorder=6)
+        kw = dict(color=ANCHOR_COLOURS.get(kind, ANCHOR_COLOUR), marker=ANCHOR_MARKERS[kind], edgecolor="black", linewidth=0.5, zorder=6)
         ax3d.scatter(*xyz, s=ANCHOR_SIZE, label=label, **kw)
         rig.scatter(*xyz, s=ANCHOR_RIG_SIZE, **kw)
         for ax, (_, i, j) in zip(ortho, PANELS):

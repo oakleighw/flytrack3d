@@ -340,6 +340,8 @@ def tracking_settings(config: dict) -> dict:
         "anchor_frame_window": 30,
         "anchor_max_px_per_frame": 40.0,
         "guided_iterations": 5,
+        "correction_low_sigma": 10.0,
+        "correction_seed_window": 30,
     }
     user = {k: v for k, v in config.get("tracking3d", {}).items() if not k.startswith("_")}
     if "visualise_backproj" in user:   # old name of visualise_backproj_graph

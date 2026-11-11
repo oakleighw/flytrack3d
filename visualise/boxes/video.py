@@ -22,6 +22,7 @@ from ..common import GT_COLOUR, PRED_COLOUR, safe_name, to_bgr
 # Back-projection videos (BGR): detector boxes, ground truth, boxes the factor graph inserted.
 VIDEO_DET_BGR, VIDEO_BACKPROJ_BGR = (255, 120, 0), (0, 0, 255)
 VIDEO_GT_BGR = to_bgr(GT_COLOUR)
+VIDEO_CORRECTED_BGR = (0, 255, 0)   # step 10: hand-corrected tracks and the hand-placed correction points
 
 
 @lru_cache(maxsize=1)
@@ -132,18 +133,27 @@ def _legend(img: np.ndarray, entries: list[tuple[tuple, bool, bool, str]], title
 
 def save_backproj_video(frames: list[Frame], preds: dict[str, np.ndarray], inserted: dict[str, np.ndarray],
                         track_points: dict[str, np.ndarray], path: Path, name: str, det_label: str, conf: float,
-                        fps: float = 30.0, crf: int = 26) -> Path:
+                        fps: float = 30.0, crf: int = 26, corrected_points: dict[str, np.ndarray] | None = None,
+                        hand_points: dict[str, np.ndarray] | None = None) -> Path:
     """One video of a camera's frames: detector boxes (conf >= conf) in thin blue, ground truth in
     green, the factor-graph tracks reprojected as a red dot in every frame (on top of the detector
     box where there is one, to show how well the track follows it), and the boxes inserted where the
     detector has none in thin red. Boxes are (M, >=4) x1, y1, x2, y2 and track_points (N, 2) x, y,
-    in raw pixels, keyed by frame key."""
+    in raw pixels, keyed by frame key.
+    Step 10 (hand corrections): corrected_points, the hand-corrected tracks reprojected where the
+    correction moved them (elsewhere they are in track_points, red), as green dots; hand_points (N, 3) x, y, exact: the hand-placed correction points as green rings, thick on
+    their own frame (exact = 1) and thin for a few frames either side, so they can be seen."""
     path.parent.mkdir(parents=True, exist_ok=True)
     entries = [(VIDEO_DET_BGR, True, False, f"{det_label} (conf >= {conf:g})")]
     if any(len(f.gt) for f in frames):
         entries.append((VIDEO_GT_BGR, True, False, "ground truth"))
     entries += [(VIDEO_BACKPROJ_BGR, False, True, "factor-graph track, reprojected (every frame)"),
                 (VIDEO_BACKPROJ_BGR, True, False, "factor graph, box inserted where the detector has none")]
+    corrected_points, hand_points = corrected_points or {}, hand_points or {}
+    if corrected_points:
+        entries.append((VIDEO_CORRECTED_BGR, False, True, "hand-corrected track, where the correction moved it"))
+    if hand_points:
+        entries.append((VIDEO_CORRECTED_BGR, False, False, "o  hand-placed correction point"))
     empty = np.zeros((0, 6))
     with VideoWriter(path, (frames[0].width, frames[0].height), fps, crf) as writer:
         for f, rgb in tqdm(iter_frame_images(frames), total=len(frames), desc=f"Video [{name}]", unit="frame",
@@ -157,6 +167,10 @@ def save_backproj_video(frames: list[Frame], preds: dict[str, np.ndarray], inser
                     cv2.rectangle(img, (x1, y1), (x2, y2), bgr, 1)
             for x, y in np.round(track_points.get(f.key, np.zeros((0, 2)))).astype(int):
                 cv2.circle(img, (x, y), 2, VIDEO_BACKPROJ_BGR, -1, cv2.LINE_AA)
+            for x, y in np.round(corrected_points.get(f.key, np.zeros((0, 2)))).astype(int):
+                cv2.circle(img, (x, y), 2, VIDEO_CORRECTED_BGR, -1, cv2.LINE_AA)
+            for x, y, exact in hand_points.get(f.key, np.zeros((0, 3))):
+                cv2.circle(img, (int(round(x)), int(round(y))), 12, VIDEO_CORRECTED_BGR, 2 if exact else 1, cv2.LINE_AA)
             _legend(img, entries, f"{name}  |  {f.key.rsplit('/', 1)[-1]}")
             writer.write(img)
     return path

@@ -1,6 +1,6 @@
 # Step 8: 3D tracking
 
-Part of the [pipeline](../README.md), which explains how to run the scripts. The `--source gt` flag and the fruit / leaves / arena overlays are described [there](../README.md#shared-by-the-3d-scripts-steps-7-to-9).
+Part of the [pipeline](../README.md), which explains how to run the scripts. The `--source gt` flag and the fruit / leaves / arena overlays are described [there](../README.md#shared-by-the-3d-scripts-steps-7-to-10).
 
 Both scripts work on the run folder that step 5 or 6 wrote, and their settings are in `configs/tracking.json`.
 

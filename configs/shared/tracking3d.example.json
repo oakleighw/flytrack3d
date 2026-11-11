@@ -1,7 +1,7 @@
 {
   "_example": true,
 
-  "_readme": "Template only. Copy to tracking3d.json in this folder, fill it in and delete the '_example' line; the main_*.py scripts refuse to run a config that still has it. Shared: other configs pull it in with \"_include\", so it is set once. Used by steps 7 to 9.",
+  "_readme": "Template only. Copy to tracking3d.json in this folder, fill it in and delete the '_example' line; the main_*.py scripts refuse to run a config that still has it. Shared: other configs pull it in with \"_include\", so it is set once. Used by steps 7 to 10.",
 
   "tracking3d": {
     "_readme": "Pixel values are in undistorted pixels; distances in world units (cameras t x t_scale). conf_threshold = the detections the tracks are built from (0.25; the saved predictions go down to the inference threshold, 0.001, for AP); null = every saved prediction. min_track_extent drops tracks that barely move (static false positives). n_tracks null = keep every track that passes min_track_frames, else keep the n with the most supporting detections. static_radius_px / static_min_fraction: before tracking, predicted detections at a spot (within static_radius_px) the detector fires on in at least static_min_fraction of a view's frames are removed as background clutter; static_min_fraction null = keep them. Keep the fraction above the share of the video a fly can sit still for.",
@@ -35,6 +35,9 @@
     "anchor_gate_px": 40,
     "anchor_frame_window": 30,
     "anchor_max_px_per_frame": 40,
-    "guided_iterations": 5
+    "guided_iterations": 5,
+    "_correction_readme": "main_human_correction.py (step 10) only. correction_low_sigma = a track frame whose 1-sigma 3D uncertainty (world units) is above this is low confidence: red in the correction window (its - / + keys change it while correcting). correction_seed_window = frames either side of a correction where the source track is not trusted to start the new solve from (the corrections are interpolated there instead); where the source track had no detection at the correction, its whole detection-free gap around it is not trusted, and this is the minimum. The corrections themselves are anchors like the guided start / end points (anchor_pixel_sigma, guided_iterations).",
+    "correction_low_sigma": 10.0,
+    "correction_seed_window": 30
   }
 }

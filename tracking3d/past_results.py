@@ -6,6 +6,8 @@ Under <run>/3d/<model or ground_truth>/:
     points/points.csv                             kind "points"
     factor_graph/tracks_<datetime>/tracks_3d.csv  kind "tracks"  (unguided)
     factor_graph/guided_<datetime>/tracks_3d.csv  kind "guided"
+    factor_graph/corrected_<datetime>/tracks_3d.csv  kind "corrected" (main_human_correction.py; its
+                                                  source_tracks_3d.csv holds the tracks before correction)
 plus the folders older versions wrote (triangulated/, tracks/, tracks_guided/, factor_graph/tracks.csv).
 """
 
@@ -22,11 +24,14 @@ from .multiview import _ask, run_folders
 
 KINDS = {"points": "triangulated points  (main_points3d.py)",
          "tracks": "unguided tracks      (main_tracks3d.py)",
-         "guided": "guided tracks        (main_tracks3d_guided.py)"}
+         "guided": "guided tracks        (main_tracks3d_guided.py)",
+         "corrected": "corrected tracks     (main_human_correction.py)"}
 # kind -> globs of its csv, relative to <run>/3d/<label>/; the current layout first, then older ones.
 PATTERNS = {"points": ("points/points.csv", "triangulated/points.csv"),
             "tracks": ("factor_graph/tracks_*/tracks_3d.csv", "factor_graph/tracks.csv", "tracks/tracks.csv"),
-            "guided": ("factor_graph/guided_*/tracks_3d.csv", "tracks_guided/tracks.csv")}
+            "guided": ("factor_graph/guided_*/tracks_3d.csv", "tracks_guided/tracks.csv"),
+            "corrected": ("factor_graph/corrected_*/tracks_3d.csv",)}
+SOURCE_CSV = "source_tracks_3d.csv"   # a corrected result's copy of the tracks it corrected
 
 
 @dataclass
@@ -84,8 +89,16 @@ class PastResult:
         """(N, 5) frame, x, y, z, n_views."""
         return np.loadtxt(self.csv, delimiter=",", skiprows=1, usecols=range(5), ndmin=2)
 
-    def load_tracks(self) -> list[SavedTrack]:
-        rows = np.loadtxt(self.csv, delimiter=",", skiprows=1, ndmin=2)   # track, frame, x, y, z, sigma, n_views
+    def corrected_ids(self) -> set[int]:
+        """A corrected result's tracks that were hand-corrected (the others are the source's, unchanged)."""
+        return {int(i) for i in self._json("tracks.json").get("corrected", [])}
+
+    def load_source_tracks(self) -> list[SavedTrack]:
+        """A corrected result's source tracks, as they were before the correction."""
+        return self.load_tracks(self.path / SOURCE_CSV)
+
+    def load_tracks(self, csv: Path | None = None) -> list[SavedTrack]:
+        rows = np.loadtxt(csv or self.csv, delimiter=",", skiprows=1, ndmin=2)   # track, frame, x, y, z, sigma, n_views
         tracks = []
         for tid in np.unique(rows[:, 0]):
             r = rows[rows[:, 0] == tid]
@@ -134,10 +147,10 @@ def choose_past_run(output_root: Path, run: str | None = None) -> tuple[Path, li
                          f"Run main_points3d.py or main_tracks3d*.py first.")
     width = max(len(d.name) for d, _ in runs) + 2
     print(f"\nRuns with saved 3D results in {output_root}")
-    print(f"  {'#':>3}  {'run':<{width}}{'points':>7}{'unguided':>10}{'guided':>8}  latest")
+    print(f"  {'#':>3}  {'run':<{width}}{'points':>7}{'unguided':>10}{'guided':>8}{'corrected':>11}  latest")
     for i, (d, results) in enumerate(runs, 1):
         n = {k: sum(r.kind == k for r in results) for k in KINDS}
-        print(f"  {i:>3}  {d.name:<{width}}{n['points']:>7}{n['tracks']:>10}{n['guided']:>8}  "
+        print(f"  {i:>3}  {d.name:<{width}}{n['points']:>7}{n['tracks']:>10}{n['guided']:>8}{n['corrected']:>11}  "
               f"{results[-1].created:%Y-%m-%d %H:%M}")
     latest = max(range(len(runs)), key=lambda i: runs[i][1][-1].created)
     return runs[_ask("Choose a run", len(runs), latest)]

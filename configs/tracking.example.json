@@ -1,9 +1,9 @@
 {
   "_example": true,
 
-  "_readme": "Template only. Copy to tracking.json in this folder, fill it in and delete the '_example' line; the main_*.py scripts refuse to run a config that still has it. Steps 7 to 9 (main_points3d.py, main_tracks3d.py, main_tracks3d_guided.py, main_visualise_past_3d.py). Everything they need is shared, so this file only lists it in \"_include\" (paths relative to this folder). To change a setting for these steps alone, add its section here: a key set here wins over an included one, e.g. \"tracking3d\": {\"n_tracks\": 3}.",
+  "_readme": "Template only. Copy to tracking.json in this folder, fill it in and delete the '_example' line; the main_*.py scripts refuse to run a config that still has it. Steps 7 to 10 (main_points3d.py, main_tracks3d.py, main_tracks3d_guided.py, main_visualise_past_3d.py, main_human_correction.py). Everything they need is shared, so this file only lists it in \"_include\" (paths relative to this folder). To change a setting for these steps alone, add its section here: a key set here wins over an included one, e.g. \"tracking3d\": {\"n_tracks\": 3}.",
 
-  "_video_dirs_readme": "Folders where the session videos are kept. A run (step 5 / 6) saves the full path of each video in its metadata.json; if a video is no longer there (moved, or its folder renamed), steps 7 to 9 look for a file of the same name in these folders and all their sub-folders, and use the first one found (metadata.json is not changed). Absolute paths.",
+  "_video_dirs_readme": "Folders where the session videos are kept. A run (step 5 / 6) saves the full path of each video in its metadata.json; if a video is no longer there (moved, or its folder renamed), steps 7 to 10 look for a file of the same name in these folders and all their sub-folders, and use the first one found (metadata.json is not changed). Absolute paths.",
   "video_dirs": ["path/to/inference"],
 
   "_include": ["shared/cameras.json", "shared/tracking3d.json", "shared/arena_plotting.json", "shared/evaluation.json"]

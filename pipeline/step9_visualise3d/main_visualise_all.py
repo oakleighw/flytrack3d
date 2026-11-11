@@ -1,8 +1,10 @@
 """Plot the 3D tracks of every run in a folder together, and compare folders (groups) of runs.
 
 Each group is a folder of run folders (the ones steps 5 to 8 write); every run in it with a
-saved factor-graph result is drawn in the group's colour. By default that is its latest guided
-result (main_tracks3d_guided.py), else its latest unguided one. Each track is the factor-graph
+saved factor-graph result is drawn in the group's colour. By default that is its latest
+hand-corrected result (step 10, main_human_correction.py), else its latest guided result
+(main_tracks3d_guided.py), else its latest unguided one: the config's "kinds" (or --kind) sets the
+order, e.g. "kinds": ["guided", "tracks"] to leave the corrections out. Each track is the factor-graph
 estimate (the line) fitted to the YOLO detections it was married to (the dots: frames that
 have detections in at least one camera; where the line runs without dots, the factor graph
 bridged a gap on its motion prior alone).

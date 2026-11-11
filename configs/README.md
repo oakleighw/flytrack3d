@@ -21,7 +21,7 @@ Stage configs:
 | `dataset_pruning.json` | step 3 | one section per script |
 | `training.json` | step 4 | the `training` section |
 | `detection.json` | steps 5 and 6 | the `models`; includes the detection source, the evaluation settings and `training.json` |
-| `tracking.json` | steps 7 to 9 | only includes: cameras, tracking3d, arena plotting, evaluation |
+| `tracking.json` | steps 7 to 10 | only includes: cameras, tracking3d, arena plotting, evaluation |
 | `external_points.json` | step 9 (external points) | the `inputs`; includes cameras, tracking3d, arena plotting |
 | `visualise_all.json` | step 9 (all runs) | the groups of runs to compare; includes arena plotting |
 
@@ -74,4 +74,4 @@ A config that includes it can write `${name}` in any setting, e.g. `"data_yaml":
 - **A YOLO dataset on disk** (`images/<split>`, `labels/<split>`, `data.yaml`) is what steps 1 to 4 build, prune and train on. Each of their configs names it in its own setting (`input_dir`, `training.data_yaml`).
 - **The detection source** is what steps 5 and 6 run the detectors on, which may be a split of such a dataset or the camera videos of one session.
 
-Steps 7 to 9 read neither: they work on the run folder that step 5 or 6 wrote.
+Steps 7 to 10 read neither: they work on the run folder that step 5 or 6 wrote.

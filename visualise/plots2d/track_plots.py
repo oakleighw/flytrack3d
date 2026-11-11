@@ -29,9 +29,11 @@ def _centres(boxes: np.ndarray) -> np.ndarray:
 def save_track_plots(frames: list[Frame], preds: dict[str, np.ndarray], out_dir: Path, model_name: str,
                      conf: float, max_distance: float = 50, max_gap: int = 5,
                      background: bool = True, dpi: int = 100, extra: dict[str, np.ndarray] | None = None,
-                     extra_label: str = "") -> list[Path]:
+                     extra_label: str = "", layers: list[tuple[dict[str, np.ndarray], dict, str]] = ()) -> list[Path]:
     """One frame-sized PNG per sequence with GT and predicted tracks drawn as lines.
-    extra: {frame key: (N, 2) xy} points drawn as orange dots on top (legend: extra_label)."""
+    extra: {frame key: (N, 2) xy} points drawn as orange dots on top (legend: extra_label).
+    layers: more point sets, in drawing order: ({frame key: (N, 2) xy}, matplotlib plot style, legend
+    label), e.g. step 10's source track, corrected track and correction clicks."""
     out_dir.mkdir(parents=True, exist_ok=True)
     saved = []
     for seq, seq_frames in group_sequences(frames).items():
@@ -62,6 +64,13 @@ def save_track_plots(frames: list[Frame], preds: dict[str, np.ndarray], out_dir:
         ex = np.vstack(ex) if ex else np.zeros((0, 2))
         if len(ex):
             ax.plot(ex[:, 0], ex[:, 1], "o", color=EXTRA_COLOUR, ms=3, alpha=0.9, zorder=4)
+        drawn = []
+        for z, (points, style, label) in enumerate(layers, 5):
+            pts = [points[f.key] for f in seq_frames if f.key in points]
+            pts = np.vstack(pts) if pts else np.zeros((0, 2))
+            if len(pts):
+                ax.plot(pts[:, 0], pts[:, 1], ls="", zorder=z, **style)
+                drawn.append((style, label, len(pts)))
         ax.set_xlim(0, w)
         ax.set_ylim(h, 0)  # image coordinates: origin top-left
         ax.set_xticks([])
@@ -78,6 +87,9 @@ def save_track_plots(frames: list[Frame], preds: dict[str, np.ndarray], out_dir:
         if len(ex):
             handles.append(Line2D([], [], color=EXTRA_COLOUR, ls="", marker="o", ms=6,
                                   label=f"{extra_label} ({len(ex)} points)"))
+        for style, label, n in drawn:
+            handles.append(Line2D([], [], ls="", **{**style, "ms": max(6, style.get("ms", 6))},
+                                  label=f"{label} ({n} points)"))
         ax.legend(handles=handles, loc="upper left", fontsize=12, framealpha=0.85,
                   title=f"{seq}  |  frames {len(seq_frames)}", title_fontsize=11)
 
