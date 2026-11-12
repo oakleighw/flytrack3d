@@ -17,7 +17,10 @@ END point per view; any of them may be left out (e.g. a start in one view only).
                s / e              START / END mode
                n, 1-9, [ / ]      new object, select object, previous / next object
                h                  show / hide detections
-               l                  show / hide the selected object's epipolar lines
+               l                  epipolar lines: off -> START / END (the selected object's
+                                  points in the other views, at their instant) -> + detections
+                                  (every other view's detections at this instant, coloured by
+                                  view: lines through the flies = offsets agree) -> off
                S / E              suggest STARTs / ENDs in this view from the other views
                                   (epipolar geometry, see tracking3d/annotator/suggest.py); marked "?",
                                   delete or replace them like any annotation
@@ -61,7 +64,7 @@ import numpy as np
 
 from common.datasets import IMAGE_EXTS
 
-from .suggest import aligned, epipolar_polyline, suggest
+from .suggest import aligned, epipolar_polyline, epipolar_polylines, suggest
 
 # BGR
 BG = (32, 32, 32)
@@ -90,6 +93,8 @@ KEY_RIGHT = {83, 65363, 2555904, 16777236}
 
 LABEL_SCALE = 0.4             # text beside the marks on the image (kept small: the flies are tiny)
 SMALL_SCALE = 0.35            # secondary text on the image (other frames' marks, epipolar lines)
+# Colour of the detection epipolar lines, by the index of the view they come from (BGR).
+VIEW_LINE_COLOURS = [(255, 255, 0), (255, 0, 255), (0, 255, 255), (0, 160, 255), (160, 255, 160)]
 
 
 def draw_cross(img: np.ndarray, p: tuple[int, int], colour, tilted: bool = False, size: int = 11, gap: int = 4) -> None:
@@ -202,7 +207,7 @@ class AnnotationGUI:
         ids = sorted({a["object"] for a in self.ann})
         self.obj = ids[0] if ids else 1
         self.show_dets = True
-        self.show_epipolar = True
+        self.epipolar_mode = "marks"
         self.status = ""
         self.done: bool | None = None               # True = finished, False = cancelled
         # interaction
@@ -521,9 +526,20 @@ class AnnotationGUI:
     def _toggle_dets(self) -> None:
         self.show_dets = not self.show_dets
 
+    # Modes the epipolar button / l cycles through: "marks" = lines of the selected object's
+    # START / END points, "dets" = those plus every other view's detections at this instant.
+    EPIPOLAR_MODES = ("off", "marks", "dets")
+    EPIPOLAR_TEXT = {"off": "off", "marks": "start/end", "dets": "+ detections"}
+
+    @property
+    def show_epipolar(self) -> bool:
+        return self.epipolar_mode != "off"
+
     def _toggle_epipolar(self) -> None:
-        self.show_epipolar = not self.show_epipolar
-        self.status = f"Epipolar lines {'shown' if self.show_epipolar else 'hidden'}"
+        modes = self.EPIPOLAR_MODES
+        self.epipolar_mode = modes[(modes.index(self.epipolar_mode) + 1) % len(modes)]
+        self.status = {"off": "Epipolar lines hidden", "marks": "Epipolar lines: START / END points",
+                       "dets": "Epipolar lines: START / END + detections"}[self.epipolar_mode]
 
     def _continue(self) -> None:
         if self.vi + 1 < len(self.views):
@@ -710,6 +726,8 @@ class AnnotationGUI:
         if cam is None or not self.show_epipolar:
             return
         h, w = self.img.shape[:2]
+        if self.epipolar_mode == "dets":
+            self._draw_detection_epipolar(vp, (w, h))
         for a in self.ann:
             if a["object"] != self.obj or a["view"] == self.view.name or a.get("suggested"):
                 continue
@@ -722,6 +740,29 @@ class AnnotationGUI:
                 cv2.polylines(vp, [disp], False, object_colour(a["object"]), 1, cv2.LINE_AA)
                 self._label(vp, f"{a['view']} {a['kind']}", tuple(disp[len(disp) // 2] + [6, -6]),
                             object_colour(a["object"]), SMALL_SCALE)
+
+    def _draw_detection_epipolar(self, vp: np.ndarray, size: tuple[int, int]) -> None:
+        """Epipolar lines of every other view's detections at this instant (its frame
+        = this aligned frame - its offset), one colour per source view, with a legend."""
+        cam = self.view.camera
+        t = aligned(self.frame_no, cam)
+        legend = []
+        for i, other in enumerate(self.views):
+            if other is self.view or other.camera is None:
+                continue
+            col = VIEW_LINE_COLOURS[i % len(VIEW_LINE_COLOURS)]
+            frame = t - other.camera.frame_offset
+            d = other.detections.get(frame)
+            if d is None or not len(d):
+                legend.append((f"{other.name} f{frame}: no detections", col))
+                continue
+            lines = epipolar_polylines(other.camera, d[:, :2], cam, size)
+            disp = np.round((lines - self.offset) * self.scale)
+            polys = [p[np.isfinite(p).all(axis=1)].astype(np.int32) for p in disp]
+            cv2.polylines(vp, [p for p in polys if len(p) >= 2], False, col, 1, cv2.LINE_AA)
+            legend.append((f"{other.name} f{frame}: {len(d)} lines", col))
+        for k, (text, col) in enumerate(legend):
+            self._label(vp, text, (10, 46 + 18 * k), col, SMALL_SCALE)
 
     @staticmethod
     def _label(img, text, org, colour, scale=LABEL_SCALE) -> None:
@@ -881,7 +922,7 @@ class AnnotationGUI:
         self._button_draw(canvas, "dets", L, y, half, 28, f"detections: {'on' if self.show_dets else 'off'} (h)",
                           active=False)
         self._button_draw(canvas, "epipolar", L + half + 10, y, half, 28,
-                          f"epipolar lines: {'on' if self.show_epipolar else 'off'} (l)")
+                          f"epipolar: {self.EPIPOLAR_TEXT[self.epipolar_mode]} (l)")
         y += 34
         self._button_draw(canvas, "sugg_start", L, y, half, 28, "suggest starts (S)", (40, 90, 40))
         self._button_draw(canvas, "sugg_end", L + half + 10, y, half, 28, "suggest ends (E)", (40, 40, 110))

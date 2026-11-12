@@ -102,6 +102,7 @@ def low_stretches(low: np.ndarray) -> list[tuple[int, int]]:
 
 class CorrectionGUI(AnnotationGUI):
     window = "Correct factor-graph tracks"
+    EPIPOLAR_MODES = ("off", "marks")   # on / off here; step 8 adds a detections mode
 
     def __init__(self, views: list[ViewInput], tracks: dict[int, dict[str, TrackView]],
                  corrections: list[dict] | None = None, fixed: list[dict] | None = None,

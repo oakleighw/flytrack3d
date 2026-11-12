@@ -51,6 +51,27 @@ def epipolar_polyline(cam_a, xy_a_raw: tuple[float, float], cam_b, size: tuple[i
     return distort(cam_b, pts)
 
 
+def epipolar_polylines(cam_a, xy_a_raw: np.ndarray, cam_b, size: tuple[int, int],
+                       n: int = 60) -> np.ndarray:
+    """epipolar_polyline for many points at once: (N, 2) raw pixels in view a ->
+    (N, n, 2) raw pixels in view b (one undistort, one F and one distort call for all)."""
+    xy = np.asarray(xy_a_raw, np.float64).reshape(-1, 2)
+    if not len(xy):
+        return np.zeros((0, n, 2))
+    xa = cam_a.undistort(xy)
+    lines = np.hstack([xa, np.ones((len(xa), 1))]) @ fundamental(cam_a, cam_b).T   # (N, 3): a, b, c
+    a, b, c = lines[:, :1], lines[:, 1:2], lines[:, 2:]
+    w, h = size
+    xs = np.linspace(-0.1 * w, 1.1 * w, n)[None, :]
+    ys = np.linspace(-0.1 * h, 1.1 * h, n)[None, :]
+    horiz = np.abs(b) >= np.abs(a)                     # mostly horizontal: sample x
+    with np.errstate(divide="ignore", invalid="ignore"):
+        px = np.where(horiz, xs, -(b * ys + c) / a)
+        py = np.where(horiz, -(a * xs + c) / b, ys)
+    pts = np.stack([px, py], axis=2)                   # (N, n, 2)
+    return distort(cam_b, pts.reshape(-1, 2)).reshape(len(xy), n, 2)
+
+
 def aligned(frame: int, cam) -> int:
     return int(frame) + cam.frame_offset
 

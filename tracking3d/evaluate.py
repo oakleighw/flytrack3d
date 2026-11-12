@@ -51,7 +51,7 @@ from detection.metrics import box_iou, match_boxes
 from detection.predictions import PRED_DIR, load_predictions, save_predictions
 from visualise.boxes.video import save_backproj_video
 from visualise.charts.evaluation import save_2d_charts, save_3d_charts
-from visualise.common import CORRECTED_COLOUR, safe_name
+from visualise.common import CORRECTED_COLOUR, MOVED_PX, safe_name
 from visualise.metrics.tracking import format_2d, format_3d
 from visualise.plots2d.track_plots import save_track_plots
 
@@ -378,7 +378,7 @@ def evaluate_2d(views: list[View], data: list[ViewData], inserted: list[dict], o
 # ----------------------------------------------------------------------------- entry
 
 HAND_POINT_HOLD = 8   # frames either side a hand-placed correction point stays drawn in the videos
-MOVED_PX = 3.0        # a corrected track is drawn green where it is this far from the source track (px, that view)
+# MOVED_PX (visualise.common): a corrected track is drawn green where it is this far from the source track (px, that view)
 
 
 def _split_moved(corrected: list[Track3D], source: dict[int, Track3D], views: list[View],

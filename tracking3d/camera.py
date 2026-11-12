@@ -61,7 +61,7 @@ class Camera:
 
     def project(self, X: np.ndarray, distort: bool = False) -> np.ndarray:
         """(N, 3) world points -> (N, 2) pixels (undistorted unless distort=True)."""
-        X = np.asarray(X, np.float64).reshape(-1, 3)
+        X = np.ascontiguousarray(X, np.float64).reshape(-1, 3)   # cv2 rejects strided views (csv columns)
         if not len(X):
             return np.zeros((0, 2))
         if distort:

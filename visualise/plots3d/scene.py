@@ -11,7 +11,8 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
-from ..common import ANCHOR_MARKERS, CORRECTED_COLOUR, GT_COLOUR, TRACK_COLOURS  # noqa: E402
+from ..common import (ANCHOR_MARKERS, CORRECTED_COLOUR, GT_COLOUR, TRACK_COLOURS,  # noqa: E402
+                      moved_frames, moved_segments)
 
 POINTS_CMAP = "plasma"   # frame colouring for triangulated points; contains no green
 # Ground truth is a wide translucent band; predictions are drawn thinner on top, so where they
@@ -136,7 +137,9 @@ def plot_tracks_3d(tracks, cameras, out_path: Path | None, title: str, points: n
     grey; optional ground-truth tracks in green; optional annotated points
     (track id, "start" / "end" / "correction", xyz) as large plus / cross / diamond markers; optional
     arena objects (scene3d.ArenaObjects: fruit, leaves), included in the plot extent; optional
-    hand-corrected tracks (step 10) as solid dark green lines over the tracks they correct."""
+    hand-corrected tracks (step 10) as solid dark green lines over the tracks they correct (the
+    track in `tracks` with the same id), only where the correction moved them over MOVED_PX in
+    some camera; all green where `tracks` has no track of that id."""
     gt_tracks, corrected = gt_tracks or [], corrected or []
     data = np.vstack([t.xyz for t in tracks] + [t.xyz for t in corrected] + [t[:, 1:4] for t in gt_tracks])
     extent = np.vstack([data, arena.points()]) if arena else data
@@ -163,16 +166,25 @@ def plot_tracks_3d(tracks, cameras, out_path: Path | None, title: str, points: n
             ax.plot(t.xyz[:, i], t.xyz[:, j], color=col, lw=PRED_TRACK_LW, zorder=3)
             ax.plot(t.xyz[0, i], t.xyz[0, j], "^", color=col, mec="black", ms=8)
             ax.plot(t.xyz[-1, i], t.xyz[-1, j], "s", color=col, mec="black", ms=6)
-    for n, t in enumerate(corrected):
-        label = f"corrected track {t.id}: frames {t.frames[0]}-{t.frames[-1]}"
-        for ax in (ax3d, rig):
-            ax.plot(*t.xyz.T, color=CORRECTED_COLOUR, lw=CORRECTED_LW, label=label if ax is ax3d else None, zorder=4)
-            ax.scatter(*t.xyz[0], color=CORRECTED_COLOUR, marker="^", s=60, edgecolor="black")
-            ax.scatter(*t.xyz[-1], color=CORRECTED_COLOUR, marker="s", s=40, edgecolor="black")
-        for ax, (_, i, j) in zip(ortho, PANELS):
-            ax.plot(t.xyz[:, i], t.xyz[:, j], color=CORRECTED_COLOUR, lw=CORRECTED_LW, zorder=4)
-            ax.plot(t.xyz[0, i], t.xyz[0, j], "^", color=CORRECTED_COLOUR, mec="black", ms=8)
-            ax.plot(t.xyz[-1, i], t.xyz[-1, j], "s", color=CORRECTED_COLOUR, mec="black", ms=6)
+    source = {t.id: t for t in tracks}
+    for t in corrected:
+        # Green only where the correction moved the track (as in the videos); elsewhere the source
+        # track shows through in its own colour.
+        moved = moved_frames(t, source.get(t.id), cameras)
+        label = f"corrected track {t.id}: frames {t.frames[0]}-{t.frames[-1]}, green where moved"
+        for n, seg in enumerate(moved_segments(moved)):
+            xyz = t.xyz[seg]
+            for ax in (ax3d, rig):
+                ax.plot(*xyz.T, color=CORRECTED_COLOUR, lw=CORRECTED_LW,
+                        label=label if ax is ax3d and n == 0 else None, zorder=4)
+            for ax, (_, i, j) in zip(ortho, PANELS):
+                ax.plot(xyz[:, i], xyz[:, j], color=CORRECTED_COLOUR, lw=CORRECTED_LW, zorder=4)
+        for k, marker, s, ms in ((0, "^", 60, 8), (-1, "s", 40, 6)):   # entry / exit, where moved
+            if len(moved) and moved[k]:
+                for ax in (ax3d, rig):
+                    ax.scatter(*t.xyz[k], color=CORRECTED_COLOUR, marker=marker, s=s, edgecolor="black")
+                for ax, (_, i, j) in zip(ortho, PANELS):
+                    ax.plot(t.xyz[k, i], t.xyz[k, j], marker, color=CORRECTED_COLOUR, mec="black", ms=ms)
     if anchors:
         _draw_anchors(ax3d, ortho, rig, anchors)
     if tracks or corrected or arena:

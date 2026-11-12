@@ -114,6 +114,7 @@ def main():
                 tracks = result.load_source_tracks()
             except OSError:
                 print("  The source tracks were not saved with this result: only the corrected run is drawn.")
+                tracks = [t for t in tracks if t.id not in ids]   # nothing to compare to: corrected all green
             anchors = result.anchors(corrected, offsets)
             title += (f"{len(tracks)} source tracks, {len(corrected)} hand-corrected in dark green "
                       f"(diamonds = corrections)")
