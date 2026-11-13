@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import atexit
 import json
+import os
 import struct
 import subprocess
 import sys
@@ -28,14 +29,20 @@ class MMDetWorker:
     """A running mmdet_worker.py process; `predict` sends a batch of RGB images, gets boxes back."""
 
     def __init__(self, python: str, config: str, checkpoint: str, repo: str | None,
-                 device: str, score_thr: float):
+                 device: str, score_thr: float, cuda_visible_devices: str | None = None):
+        """device is as written in the config ("cuda:1"), relative to cuda_visible_devices, which
+        is CUDA_VISIBLE_DEVICES as the user launched the script (None = unset, all GPUs visible)."""
         cmd = [python, "-I", str(WORKER), "--config", config, "--checkpoint", checkpoint,
                "--device", device, "--score-thr", str(score_thr)]
         if repo:
             cmd += ["--repo", repo]
+        env = dict(os.environ)
+        env.pop("CUDA_VISIBLE_DEVICES", None)  # possibly overwritten by SAHI's select_device
+        if cuda_visible_devices is not None:
+            env["CUDA_VISIBLE_DEVICES"] = cuda_visible_devices
         # stderr is inherited, so mmdet's load messages and any traceback show in this terminal.
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                     stderr=sys.stderr)
+                                     stderr=sys.stderr, env=env)
         atexit.register(self.close)
         msg = self._recv()
         self.classes: list[str] = msg["classes"]
@@ -81,14 +88,19 @@ class MMDetWorker:
 class RemoteMMDetModel(DetectionModel):
     """SAHI detection model whose forward pass runs in an MMDetWorker."""
 
-    def __init__(self, *, python: str, repo: str | None, **kwargs):
+    def __init__(self, *, python: str, repo: str | None, worker_device: str,
+                 cuda_visible_devices: str | None, **kwargs):
+        # The worker gets the configured device string, not SAHI's self.device: SAHI's
+        # select_device rewrites CUDA_VISIBLE_DEVICES, so its device index means another GPU.
         self.python, self.repo = python, repo
+        self.worker_device, self.cuda_visible_devices = worker_device, cuda_visible_devices
         self.worker: MMDetWorker | None = None
         super().__init__(**kwargs)
 
     def load_model(self) -> None:
         self.worker = MMDetWorker(self.python, self.config_path, self.model_path, self.repo,
-                                  str(self.device), self.confidence_threshold)
+                                  self.worker_device, self.confidence_threshold,
+                                  self.cuda_visible_devices)
         self.model = self.worker
         self.category_mapping = {str(i): n for i, n in enumerate(self.worker.classes)}
 

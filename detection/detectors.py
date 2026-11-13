@@ -17,10 +17,15 @@ register it in `DETECTOR_TYPES`.
 from __future__ import annotations
 
 import hashlib
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 
 import numpy as np
+
+# CUDA_VISIBLE_DEVICES as the user launched the script. SAHI's select_device overwrites it in
+# os.environ (with the configured device's index), so subprocesses must not inherit that value.
+LAUNCH_CUDA_VISIBLE_DEVICES = os.environ.get("CUDA_VISIBLE_DEVICES")
 
 
 def file_sha256(path: str | Path, chunk: int = 1 << 20) -> str:
@@ -172,6 +177,7 @@ class MMDetSahiDetector(SahiDetector):
         c = self.cfg
         self.model = RemoteMMDetModel(
             python=c["python"], repo=c["mmdet_repo"],
+            worker_device=c.get("device", "cuda:0"), cuda_visible_devices=LAUNCH_CUDA_VISIBLE_DEVICES,
             model_path=self.model_path, config_path=c["config_path"],
             confidence_threshold=self.confidence_threshold, device=c.get("device", "cuda:0"),
         )
