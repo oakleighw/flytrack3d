@@ -137,6 +137,47 @@ class SahiDetector(Detector):
         ).reshape(-1, 6)
 
 
+class MMDetSahiDetector(SahiDetector):
+    """MMDetection models (DINO, RT-DETR, ...) with the same SAHI slicing and merging as
+    `SahiDetector`. mmdet runs in a worker process on another Python env, since it can't be
+    installed in this one (see mmdet_remote.py).
+
+    Config keys on top of SahiDetector's:
+        config_path     the config mmdet saved in the training work_dir
+        model_path      the checkpoint (epoch_N.pth)
+        mmdet_repo      source checkout put first on sys.path, as the training script did
+                        (the rtdetr-mmdet fork for RT-DETR); null = the env's installed mmdet
+        python          the interpreter of the env that has mmdet (the openmmlab conda env)
+    image_size and model_type don't apply: each image is resized by the config's test pipeline.
+    """
+
+    # python only picks the interpreter; config_path is replaced by the config's sha256 below.
+    NON_CACHE_KEYS = SahiDetector.NON_CACHE_KEYS | {"python", "config_path", "model_type", "image_size"}
+
+    def __init__(self, cfg: dict):
+        from .mmdet_remote import DEFAULT_PYTHON
+
+        super().__init__({"python": DEFAULT_PYTHON, "mmdet_repo": None, **cfg})
+        if not self.cfg.get("config_path"):
+            raise ValueError(f"Model '{self.name}': type 'mmdet_sahi' needs 'config_path'.")
+
+    def cache_params(self) -> dict:
+        params = super().cache_params()
+        params["config_sha256"] = file_sha256(self.cfg["config_path"])
+        return params
+
+    def load(self) -> None:
+        from .mmdet_remote import RemoteMMDetModel
+
+        c = self.cfg
+        self.model = RemoteMMDetModel(
+            python=c["python"], repo=c["mmdet_repo"],
+            model_path=self.model_path, config_path=c["config_path"],
+            confidence_threshold=self.confidence_threshold, device=c.get("device", "cuda:0"),
+        )
+        self.class_names = {int(k): v for k, v in self.model.category_mapping.items()}
+
+
 class UltralyticsDetector(Detector):
     """Plain full-frame Ultralytics inference (no slicing) - a useful baseline."""
 
@@ -167,6 +208,7 @@ class UltralyticsDetector(Detector):
 
 DETECTOR_TYPES: dict[str, type[Detector]] = {
     "sahi": SahiDetector,
+    "mmdet_sahi": MMDetSahiDetector,
     "ultralytics": UltralyticsDetector,
 }
 
