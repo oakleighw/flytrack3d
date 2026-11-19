@@ -11,3 +11,4 @@ __pycache__/
 
 # Evaluation outputs (predictions, metrics, videos; metadata contains local paths)
 output/
+weights/*.pt
