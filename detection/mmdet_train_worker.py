@@ -79,12 +79,11 @@ def build_config(spec):
     recipe_epochs = cfg.train_cfg.max_epochs
     epochs = spec['epochs']
 
-    # Pretrained weights: a whole detector (load_from) or only the backbone (init_cfg)
+    # Pretrained weights: the backbone (init_cfg) and/or a whole detector (load_from). With both,
+    # load_from is applied after init_weights and overwrites the backbone with the detector's.
     if spec.get('backbone_pretrained'):
         cfg.model.backbone.init_cfg = dict(type='Pretrained', checkpoint=spec['backbone_pretrained'])
-        cfg.load_from = None
-    else:
-        cfg.load_from = spec.get('load_from')
+    cfg.load_from = spec.get('load_from')
     if spec.get('custom_imports'):
         cfg.custom_imports = dict(imports=list(spec['custom_imports']), allow_failed_imports=False)
 
