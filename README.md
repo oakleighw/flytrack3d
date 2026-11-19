@@ -33,7 +33,7 @@ The scripts to run are the `main_*.py` files in `pipeline/`, grouped into number
 | 1 | [step1_image_dataset_creation](pipeline/step1_image_dataset_creation/README.md) | build, merge, convert and check YOLO datasets | `image_dataset.json` |
 | 2 | [step2_image_tiling](pipeline/step2_image_tiling/README.md) | tile a full-frame dataset into training crops | `image_tiling.json` |
 | 3 | [step3_dataset_pruning](pipeline/step3_dataset_pruning/README.md) | find near-identical frames and build a pruned dataset | `dataset_pruning.json` |
-| 4 | [step4_training](pipeline/step4_training/README.md) | train a YOLO detector | `training.json` |
+| 4 | [step4_training](pipeline/step4_training/README.md) | train a YOLO or MMDetection detector | `training.json`, `mmdet_training.json` |
 | 5 | [step5_evaluation](pipeline/step5_evaluation/README.md) | run detectors and score them against ground truth | `detection.json` |
 | 6 | [step6_inference](pipeline/step6_inference/README.md) | run detectors on new recordings, without ground truth | `detection.json` |
 | 7 | [step7_points3d](pipeline/step7_points3d/README.md) | match detections across cameras and triangulate them | `tracking.json` |
@@ -83,6 +83,7 @@ The scripts to run are the `main_*.py` files in `pipeline/`, grouped into number
 **`detection/`**
 
 - `training.py`: builds the YOLO model (version, size, P2 head, pretrained weights) and runs Ultralytics training
+- `mmdet_training.py`: launches MMDetection training in `mmdet_train_worker.py`, which runs on the openmmlab env's Python and adapts the upstream recipe (dataset, batch and LR, schedule, best-by-fitness checkpoints)
 - the rest is its evaluation: detectors, metrics, saved predictions and their cache (`predictions.py`) and the evaluation pipeline
 
 **`tracking3d/`**

@@ -8,7 +8,7 @@ from pathlib import Path
 
 PATH_KEYS = {"images", "labels", "video", "inputs", "videos_dir", "annotations_zip", "input_dir", "data_yaml",
              "model_path", "config_path", "output_dir", "p2_model_yaml", "weights_dir", "csv", "fg_labels", "videos", "save",
-             "folder", "save_dir"}
+             "folder", "save_dir", "recipe", "repo", "load_from", "backbone_pretrained", "data_root"}
 ROOT = Path(__file__).resolve().parents[1]   # the repository root
 
 
@@ -33,12 +33,41 @@ def trained_weights(output_dir: str | Path, wandb_project: str, run: str) -> Pat
     return Path(output_dir) / "training" / wandb_project / run / "weights" / "best.pt"
 
 
+MMDET_BEST_GLOB = "best_coco_fitness_epoch_*.pth"
+
+
+def resolve_mmdet_run(config: dict, model: dict, run: str) -> None:
+    """An mmdet_sahi model_path that is a run name of main_train_mmdet.py becomes that run's
+    best_coco_fitness_epoch_N.pth, <output_dir>/training/<mmdet_training.wandb_project>/<name>/, and
+    config_path (unless set) the merged config saved next to it."""
+    project = config.get("mmdet_training", {}).get("wandb_project")
+    if not project:
+        raise SystemExit(f"Model '{model.get('name')}': model_path '{run}' is an mmdet training run name, "
+                         f"but the config has no mmdet_training.wandb_project to look it up in "
+                         f"(include mmdet_training.json).")
+    run_dir = Path(config["output_dir"]) / "training" / project / run
+    best = sorted(run_dir.glob(MMDET_BEST_GLOB))
+    configs = sorted(run_dir.glob("*.py"))
+    if model.get("enabled") and (len(best) != 1 or (not model.get("config_path") and len(configs) != 1)):
+        runs = sorted(d.name for d in run_dir.parent.glob("*") if any(d.glob(MMDET_BEST_GLOB)))
+        raise SystemExit(f"Model '{model.get('name')}': run '{run}' needs exactly one {MMDET_BEST_GLOB} "
+                         f"and one merged config .py in {run_dir} (found {len(best)} and {len(configs)}).\n"
+                         f"Runs with a best checkpoint in {run_dir.parent}: {', '.join(runs) or 'none'}")
+    model["model_path"] = str(best[0] if len(best) == 1 else run_dir / MMDET_BEST_GLOB)
+    if not model.get("config_path") and len(configs) == 1:
+        model["config_path"] = str(configs[0])
+
+
 def resolve_trained_runs(config: dict) -> None:
     """A model_path that is a run name becomes that run's best.pt,
-    <output_dir>/training/<training.wandb_project>/<name>/weights/best.pt."""
+    <output_dir>/training/<training.wandb_project>/<name>/weights/best.pt, or for an mmdet_sahi
+    model its best_coco_fitness_epoch_N.pth (resolve_mmdet_run)."""
     for model in config.get("models", []):
         run = model.get("model_path")
         if not is_run_name(run):
+            continue
+        if model.get("type") == "mmdet_sahi":
+            resolve_mmdet_run(config, model, run)
             continue
         project = config.get("training", {}).get("wandb_project")
         if not project:

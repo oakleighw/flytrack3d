@@ -50,13 +50,14 @@ Config: `configs/image_tiling.json`. Details: [step2_image_tiling](step2_image_t
 
 Config: `configs/dataset_pruning.json`, one section per script. Details: [step3_dataset_pruning](step3_dataset_pruning/README.md).
 
-### Step 4: YOLO training
+### Step 4: training
 
 | Script | What it does |
 | --- | --- |
 | `main_train_detector.py` | trains a YOLO detector with Ultralytics, optionally with a P2 head |
+| `main_train_mmdet.py` | trains an MMDetection detector (DINO, RT-DETR, ...) from its upstream recipe |
 
-Config: `configs/training.json`. Details: [step4_training](step4_training/README.md).
+Configs: `configs/training.json` (YOLO), `configs/mmdet_training.json` (MMDetection). Details: [step4_training](step4_training/README.md).
 
 ### Step 5: evaluation
 

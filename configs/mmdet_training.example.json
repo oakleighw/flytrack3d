@@ -1,0 +1,51 @@
+{
+  "_example": true,
+
+  "_readme": "Template only. Copy to mmdet_training.json in this folder, fill it in and delete the '_example' line; the main_*.py scripts refuse to run a config that still has it. Step 4 (main_train_mmdet.py). The detection configs include it, so that an mmdet_sahi model there can name one of these training runs.",
+
+  "_include": ["shared/paths.json"],
+
+  "mmdet_training": {
+    "_readme": "Settings for main_train_mmdet.py; the keys here are shared by every model, and a model's own keys win. python = an env with mmdet (training runs in a worker on it). data_root = a COCO export of the YOLO dataset; train_ann / val_ann are relative to it (val is also used as the test split during training), img_prefix = the images folder in it. classes = the class names (num_classes is set from them). The run is written to <output_dir>/training/<wandb_project>/<run name>/ (_2, _3, ... if that name exists) and logs to W&B under wandb_project / wandb_group / run name. epochs = training length. schedule = 'recipe' keeps the recipe's LR schedulers and stage switches, with epoch milestones and switch epochs stretched from the recipe's length to epochs (iteration-based warmup unchanged), or 'warmup_cosine' (1000-iteration warmup, then cosine to 0). seed = fixed seed, null = random. Checkpoints: every epoch, keeping the latest max_keep_ckpts plus best_coco_fitness_epoch_N.pth, the best by 0.1 mAP50 + 0.9 mAP50-95 (Ultralytics fitness). log_interval = iterations between log lines.",
+    "python": "/path/to/miniconda3/envs/openmmlab/bin/python",
+    "data_root": "path/to/dataset_coco",
+    "train_ann": "annotations/instances_train.json",
+    "val_ann": "annotations/instances_val.json",
+    "img_prefix": "data/",
+    "classes": ["fly"],
+    "wandb_project": "fly-detect-compare-all",
+    "wandb_group": "unified_benchmarks",
+    "epochs": 50,
+    "schedule": "recipe",
+    "seed": 0,
+    "max_keep_ckpts": 2,
+    "log_interval": 250,
+
+    "models": {
+      "_readme": "One entry per model, picked with --model. recipe = the upstream mmdet config. repo = the mmdet source checkout to import (the rtdetr-mmdet fork for RT-DETR). load_from = pretrained weights for the whole detector, or backbone_pretrained = weights for the backbone only. custom_imports = modules the recipe needs imported. batch_size / val_batch_size = per-GPU batch, null = the recipe's. accumulative_counts = gradient accumulation steps. The LR is scaled linearly from the recipe's total batch (auto_scale_lr.base_batch_size, e.g. 16 for an 8xb2 recipe) to batch_size x accumulative_counts, so matching that total keeps the recipe's LR. amp = mixed precision. gpu = GPU index as nvidia-smi numbers it. run_name = run folder and W&B run name.",
+      "dino": {
+        "recipe": "path/to/mmdetection/configs/dino/dino-4scale_r50_8xb2-12e_coco.py",
+        "repo": "path/to/mmdetection",
+        "load_from": "path/to/models/dino-4scale_r50_8xb2-12e_coco_20221202_182705-55b2bba2.pth",
+        "batch_size": 2,
+        "val_batch_size": null,
+        "accumulative_counts": 8,
+        "amp": false,
+        "gpu": 1,
+        "run_name": "dino_run"
+      },
+      "rtdetr": {
+        "recipe": "path/to/rtdetr-mmdet/configs/rtdetrv2/rtdetrv2_r18vd_8xb2-120e_coco.py",
+        "repo": "path/to/rtdetr-mmdet",
+        "backbone_pretrained": "path/to/models/resnet18vd_pretrained_265f1124.pth",
+        "custom_imports": ["mmdet"],
+        "batch_size": 16,
+        "val_batch_size": 16,
+        "accumulative_counts": 1,
+        "amp": false,
+        "gpu": 0,
+        "run_name": "rtdetr_run"
+      }
+    }
+  }
+}

@@ -19,7 +19,8 @@ Stage configs:
 | `image_dataset.json` | step 1 | one section per script |
 | `image_tiling.json` | step 2 | the tiling settings |
 | `dataset_pruning.json` | step 3 | one section per script |
-| `training.json` | step 4 | the `training` section |
+| `training.json` | step 4 (YOLO) | the `training` section |
+| `mmdet_training.json` | step 4 (MMDetection) | the `mmdet_training` section: shared settings and one entry per model |
 | `detection.json` | steps 5 and 6 | the `models`; includes the detection source, the evaluation settings and `training.json` |
 | `tracking.json` | steps 7 to 10 | only includes: cameras, tracking3d, arena plotting, evaluation |
 | `external_points.json` | step 9 (external points) | the `inputs`; includes cameras, tracking3d, arena plotting |
